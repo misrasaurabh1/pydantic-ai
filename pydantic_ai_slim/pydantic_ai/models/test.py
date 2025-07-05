@@ -286,6 +286,7 @@ class _JsonSchemaTestData:
         self.schema = schema
         self.defs = schema.get('$defs', {})
         self.seed = seed
+        self._seed_bool = bool(seed % 2)  # Precompute for faster access
 
     def generate(self) -> Any:
         """Generate data for the JSON schema."""
@@ -388,7 +389,7 @@ class _JsonSchemaTestData:
 
     def _bool_gen(self) -> bool:
         """Generate a boolean from a JSON Schema boolean."""
-        return bool(self.seed % 2)
+        return self._seed_bool
 
     def _array_gen(self, schema: dict[str, Any]) -> list[Any]:
         """Generate an array from a JSON Schema array."""
