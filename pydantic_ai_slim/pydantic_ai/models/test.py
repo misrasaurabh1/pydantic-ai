@@ -394,24 +394,38 @@ class _JsonSchemaTestData:
         """Generate an array from a JSON Schema array."""
         data: list[Any] = []
         unique_items = schema.get('uniqueItems')
-        if prefix_items := schema.get('prefixItems'):
+        prefix_items = schema.get('prefixItems')
+        if prefix_items is not None:
+            data_extend = data.extend
+            gen_any = self._gen_any
             for item in prefix_items:
-                data.append(self._gen_any(item))
+                data.append(gen_any(item))
                 if unique_items:
                     self.seed += 1
 
         items_schema = schema.get('items', {})
         min_items = schema.get('minItems', 0)
-        if min_items > len(data):
-            for _ in range(min_items - len(data)):
-                data.append(self._gen_any(items_schema))
-                if unique_items:
+        dlen = len(data)
+        append = data.append
+        gen_any = self._gen_any
+        if min_items > dlen:
+            to_add = min_items - dlen
+            if unique_items:
+                for _ in range(to_add):
+                    append(gen_any(items_schema))
                     self.seed += 1
+            else:
+                append_ = append
+                item = gen_any(items_schema)
+                # Use [item] * to extend with identicals (faster for non-unique arrays)
+                for _ in range(to_add):
+                    append_(item)
         elif items_schema:
             # if there is an `items` schema, add an item unless it would break `maxItems` rule
             max_items = schema.get('maxItems')
             if max_items is None or max_items > len(data):
-                data.append(self._gen_any(items_schema))
+                item = gen_any(items_schema)
+                append(item)
                 if unique_items:
                     self.seed += 1
 
