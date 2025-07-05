@@ -494,6 +494,8 @@ class ToolOutputSchema(OutputSchema[OutputDataT]):
 
     def __init__(self, tools: dict[str, OutputTool[OutputDataT]]):
         self._tools = tools
+        # Precompute and cache the tool names for faster subsequent lookups
+        self._tool_names = list(tools.keys())
 
     @property
     def mode(self) -> OutputMode:
@@ -511,7 +513,7 @@ class ToolOutputSchema(OutputSchema[OutputDataT]):
 
     def tool_names(self) -> list[str]:
         """Return the names of the tools."""
-        return list(self.tools.keys())
+        return self._tool_names
 
     def tool_defs(self) -> list[ToolDefinition]:
         """Get tool definitions to register with the model."""
