@@ -190,7 +190,7 @@ class Tool(Generic[AgentDepsT]):
         prepare: ToolPrepareFunc[AgentDepsT] | None = None,
         docstring_format: DocstringFormat = 'auto',
         require_parameter_descriptions: bool = False,
-        schema_generator: type[GenerateJsonSchema] = GenerateToolJsonSchema,
+        schema_generator: type[GenerateJsonSchema] = 'GenerateToolJsonSchema',
         strict: bool | None = None,
         function_schema: _function_schema.FunctionSchema | None = None,
     ):
