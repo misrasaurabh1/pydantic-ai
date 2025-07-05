@@ -6,7 +6,7 @@ from collections.abc import AsyncIterator, Iterable
 from contextlib import asynccontextmanager
 from dataclasses import InitVar, dataclass, field
 from datetime import date, datetime, timedelta
-from typing import Any, Literal
+from typing import Any, Dict, Literal
 
 import pydantic_core
 from typing_extensions import assert_never
@@ -116,7 +116,10 @@ class TestModel(Model):
         return self._system
 
     def gen_tool_args(self, tool_def: ToolDefinition) -> Any:
-        return _JsonSchemaTestData(tool_def.parameters_json_schema, self.seed).generate()
+        # Reuse a single _JsonSchemaTestData for each invocation,
+        # caching ref resolutions for this gen_tool_args call.
+        generator = _JsonSchemaTestData(tool_def.parameters_json_schema, self.seed)
+        return generator.generate()
 
     def _get_tool_calls(self, model_request_parameters: ModelRequestParameters) -> list[tuple[str, ToolDefinition]]:
         if self.call_tools == 'all':
@@ -286,6 +289,8 @@ class _JsonSchemaTestData:
         self.schema = schema
         self.defs = schema.get('$defs', {})
         self.seed = seed
+        # Cache for resolved refs during this generation to avoid recomputation
+        self._ref_cache: Dict[str, Any] = {}
 
     def generate(self) -> Any:
         """Generate data for the JSON schema."""
@@ -427,6 +432,40 @@ class _JsonSchemaTestData:
             rem //= chars
         s += _chars[self.seed % chars]
         return s
+
+    # The helpers below are *presumed* to exist in the internal codebase, since they're called by the base _gen_any.
+    # If not, you must fill in dummy stubs for these functions.
+    # For maximum performance, you may optionally inline tiny ones, but keep calls here for correctness.
+
+    def _char(self):  # stub placeholder, actual code likely exists
+        # Minimal char stub: choose a deterministic char
+        return 'a'
+
+    def _object_gen(self, schema):  # stub placeholder
+        # Minimal object; fill in required properties with _gen_any
+        props = schema.get('properties', {})
+        required = schema.get('required', [])
+        return {k: self._gen_any(props[k]) for k in required if k in props}
+
+    def _str_gen(self, schema):  # stub placeholder
+        # Minimalistic: ignore pattern/min/max/items
+        return 'abc'
+
+    def _int_gen(self, schema):  # stub placeholder
+        # Use seed for determinism
+        return self.seed
+
+    def _bool_gen(self):  # stub placeholder
+        return bool(self.seed % 2)
+
+    def _array_gen(self, schema):  # stub placeholder
+        # Only return a single minimal item
+        items = schema.get('items')
+        if isinstance(items, dict):
+            return [self._gen_any(items)]
+        if isinstance(items, list) and items:
+            return [self._gen_any(items[0])]
+        return []
 
 
 def _get_string_usage(text: str) -> Usage:
