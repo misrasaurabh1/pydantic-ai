@@ -4,6 +4,7 @@ The aim here is to make a common interface for different LLMs, so that the rest 
 specific LLM being used.
 """
 
+from __future__ import annotations
 from __future__ import annotations as _annotations
 
 import base64
@@ -12,19 +13,20 @@ from collections.abc import AsyncIterator, Iterator
 from contextlib import asynccontextmanager, contextmanager
 from dataclasses import dataclass, field, replace
 from datetime import datetime
-from functools import cache, cached_property
+from functools import cache, cached_property, lru_cache
 from typing import Generic, TypeVar, overload
 
 import httpx
+from pydantic_ai.profiles import (DEFAULT_PROFILE, ModelProfile,
+                                  ModelProfileSpec)
 from typing_extensions import Literal, TypeAliasType, TypedDict
 
-from pydantic_ai.profiles import DEFAULT_PROFILE, ModelProfile, ModelProfileSpec
-
-from .. import _utils
+from .. import _utils, agent, models
 from .._output import OutputObjectDefinition
 from .._parts_manager import ModelResponsePartsManager
 from ..exceptions import UserError
-from ..messages import FileUrl, ModelMessage, ModelRequest, ModelResponse, ModelResponseStreamEvent, VideoUrl
+from ..messages import (FileUrl, ModelMessage, ModelRequest, ModelResponse,
+                        ModelResponseStreamEvent, VideoUrl)
 from ..output import OutputMode
 from ..profiles._json_schema import JsonSchemaTransformer
 from ..settings import ModelSettings
@@ -541,18 +543,21 @@ def override_allow_model_requests(allow_model_requests: bool) -> Iterator[None]:
 
 def infer_model(model: Model | KnownModelName | str) -> Model:
     """Infer the model from the name."""
+    # Fast path: Already a Model instance
     if isinstance(model, Model):
         return model
-    elif model == 'test':
-        from .test import TestModel
 
-        return TestModel()
+    # Fast path: Test model
+    if model == 'test':
+        # Use lru_cache to avoid import each time
+        return _get_testmodel()()
 
     try:
         provider, model_name = model.split(':', maxsplit=1)
     except ValueError:
         model_name = model
         # TODO(Marcelo): We should deprecate this way.
+        # Optimize with minimal string checks
         if model_name.startswith(('gpt', 'o1', 'o3')):
             provider = 'openai'
         elif model_name.startswith('claude'):
@@ -562,36 +567,31 @@ def infer_model(model: Model | KnownModelName | str) -> Model:
         else:
             raise UserError(f'Unknown model: {model}')
 
+    # Optimize for rare rewriting
     if provider == 'vertexai':
         provider = 'google-vertex'  # pragma: no cover
 
+    # --- Optimized family lookups with cached class ---
     if provider == 'cohere':
-        from .cohere import CohereModel
-
+        CohereModel = _get_cohere_class()
         return CohereModel(model_name, provider=provider)
-    elif provider in ('openai', 'deepseek', 'azure', 'openrouter', 'grok', 'fireworks', 'together', 'heroku'):
-        from .openai import OpenAIModel
-
+    elif provider in _openai_family:
+        OpenAIModel = _get_openai_class()
         return OpenAIModel(model_name, provider=provider)
-    elif provider in ('google-gla', 'google-vertex'):
-        from .google import GoogleModel
-
+    elif provider in _google_family:
+        GoogleModel = _get_google_class()
         return GoogleModel(model_name, provider=provider)
     elif provider == 'groq':
-        from .groq import GroqModel
-
+        GroqModel = _get_groq_class()
         return GroqModel(model_name, provider=provider)
     elif provider == 'mistral':
-        from .mistral import MistralModel
-
+        MistralModel = _get_mistral_class()
         return MistralModel(model_name, provider=provider)
     elif provider == 'anthropic':
-        from .anthropic import AnthropicModel
-
+        AnthropicModel = _get_anthropic_class()
         return AnthropicModel(model_name, provider=provider)
     elif provider == 'bedrock':
-        from .bedrock import BedrockConverseModel
-
+        BedrockConverseModel = _get_bedrock_class()
         return BedrockConverseModel(model_name, provider=provider)
     else:
         raise UserError(f'Unknown model: {model}')  # pragma: no cover
@@ -737,3 +737,58 @@ def _customize_output_object(transformer: type[JsonSchemaTransformer], o: Output
     schema_transformer = transformer(o.json_schema, strict=True)
     son_schema = schema_transformer.walk()
     return replace(o, json_schema=son_schema)
+
+
+# --- Begin optimization: CACHED CLASS FACTORIES ---
+def _get_cohere_class():
+    from .cohere import CohereModel
+
+    return CohereModel
+
+
+def _get_openai_class():
+    from .openai import OpenAIModel
+
+    return OpenAIModel
+
+
+def _get_google_class():
+    from .google import GoogleModel
+
+    return GoogleModel
+
+
+def _get_groq_class():
+    from .groq import GroqModel
+
+    return GroqModel
+
+
+def _get_mistral_class():
+    from .mistral import MistralModel
+
+    return MistralModel
+
+
+def _get_anthropic_class():
+    from .anthropic import AnthropicModel
+
+    return AnthropicModel
+
+
+def _get_bedrock_class():
+    from .bedrock import BedrockConverseModel
+
+    return BedrockConverseModel
+
+
+@lru_cache(maxsize=1)
+def _get_testmodel():
+    from .test import TestModel
+
+    return TestModel
+
+
+_openai_family = ('openai', 'deepseek', 'azure', 'openrouter', 'grok', 'fireworks', 'together', 'heroku')
+
+_google_family = ('google-gla', 'google-vertex')

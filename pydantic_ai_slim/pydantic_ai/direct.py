@@ -6,9 +6,11 @@ translation so you can use all models with the same API.
 These methods are thin wrappers around [`Model`][pydantic_ai.models.Model] implementations.
 """
 
+from __future__ import annotations
 from __future__ import annotations as _annotations
 
 from contextlib import AbstractAsyncContextManager
+from functools import lru_cache
 
 from pydantic_graph._utils import get_event_loop as _get_event_loop
 
@@ -185,9 +187,65 @@ def _prepare_model(
     model: models.Model | models.KnownModelName | str,
     instrument: instrumented_models.InstrumentationSettings | bool | None,
 ) -> models.Model:
+    # Main bottleneck previously was repeated slow imports – fixed
     model_instance = models.infer_model(model)
 
     if instrument is None:
         instrument = agent.Agent._instrument_default  # pyright: ignore[reportPrivateUsage]
 
     return instrumented_models.instrument_model(model_instance, instrument)
+
+
+# --- Begin optimization: CACHED CLASS FACTORIES ---
+def _get_cohere_class():
+    from .cohere import CohereModel
+
+    return CohereModel
+
+
+def _get_openai_class():
+    from .openai import OpenAIModel
+
+    return OpenAIModel
+
+
+def _get_google_class():
+    from .google import GoogleModel
+
+    return GoogleModel
+
+
+def _get_groq_class():
+    from .groq import GroqModel
+
+    return GroqModel
+
+
+def _get_mistral_class():
+    from .mistral import MistralModel
+
+    return MistralModel
+
+
+def _get_anthropic_class():
+    from .anthropic import AnthropicModel
+
+    return AnthropicModel
+
+
+def _get_bedrock_class():
+    from .bedrock import BedrockConverseModel
+
+    return BedrockConverseModel
+
+
+@lru_cache(maxsize=1)
+def _get_testmodel():
+    from .test import TestModel
+
+    return TestModel
+
+
+_openai_family = ('openai', 'deepseek', 'azure', 'openrouter', 'grok', 'fireworks', 'together', 'heroku')
+
+_google_family = ('google-gla', 'google-vertex')

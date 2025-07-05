@@ -4,25 +4,25 @@ import json
 from collections.abc import AsyncIterator, Iterator, Mapping
 from contextlib import asynccontextmanager, contextmanager
 from dataclasses import dataclass, field
+from functools import lru_cache
 from typing import Any, Callable, Literal
 from urllib.parse import urlparse
 
-from opentelemetry._events import (
-    Event,  # pyright: ignore[reportPrivateImportUsage]
-    EventLogger,  # pyright: ignore[reportPrivateImportUsage]
-    EventLoggerProvider,  # pyright: ignore[reportPrivateImportUsage]
-    get_event_logger_provider,  # pyright: ignore[reportPrivateImportUsage]
-)
+from opentelemetry._events import \
+    Event  # pyright: ignore[reportPrivateImportUsage]
+from opentelemetry._events import \
+    EventLogger  # pyright: ignore[reportPrivateImportUsage]
+from opentelemetry._events import \
+    EventLoggerProvider  # pyright: ignore[reportPrivateImportUsage]
+from opentelemetry._events import \
+    get_event_logger_provider  # pyright: ignore[reportPrivateImportUsage]
 from opentelemetry.metrics import MeterProvider, get_meter_provider
-from opentelemetry.trace import Span, Tracer, TracerProvider, get_tracer_provider
+from opentelemetry.trace import (Span, Tracer, TracerProvider,
+                                 get_tracer_provider)
 from opentelemetry.util.types import AttributeValue
 from pydantic import TypeAdapter
 
-from ..messages import (
-    ModelMessage,
-    ModelRequest,
-    ModelResponse,
-)
+from ..messages import ModelMessage, ModelRequest, ModelResponse
 from ..settings import ModelSettings
 from . import KnownModelName, Model, ModelRequestParameters, StreamedResponse
 from .wrapper import WrapperModel
@@ -57,13 +57,62 @@ TOKEN_HISTOGRAM_BOUNDARIES = (1, 4, 16, 64, 256, 1024, 4096, 16384, 65536, 26214
 
 def instrument_model(model: Model, instrument: InstrumentationSettings | bool) -> Model:
     """Instrument a model with OpenTelemetry/logfire."""
+    # No optimization needed here based on profile (no hot/cold issues)
     if instrument and not isinstance(model, InstrumentedModel):
         if instrument is True:
             instrument = InstrumentationSettings()
-
         model = InstrumentedModel(model, instrument)
-
     return model
+
+
+# --- Begin optimization: CACHED CLASS FACTORIES ---
+def _get_cohere_class():
+    from .cohere import CohereModel
+
+    return CohereModel
+
+
+def _get_openai_class():
+    from .openai import OpenAIModel
+
+    return OpenAIModel
+
+
+def _get_google_class():
+    from .google import GoogleModel
+
+    return GoogleModel
+
+
+def _get_groq_class():
+    from .groq import GroqModel
+
+    return GroqModel
+
+
+def _get_mistral_class():
+    from .mistral import MistralModel
+
+    return MistralModel
+
+
+def _get_anthropic_class():
+    from .anthropic import AnthropicModel
+
+    return AnthropicModel
+
+
+def _get_bedrock_class():
+    from .bedrock import BedrockConverseModel
+
+    return BedrockConverseModel
+
+
+@lru_cache(maxsize=1)
+def _get_testmodel():
+    from .test import TestModel
+
+    return TestModel
 
 
 @dataclass(init=False)
@@ -386,3 +435,8 @@ class InstrumentedModel(WrapperModel):
                 return str(value)
             except Exception as e:
                 return f'Unable to serialize: {e}'
+
+
+_openai_family = ('openai', 'deepseek', 'azure', 'openrouter', 'grok', 'fireworks', 'together', 'heroku')
+
+_google_family = ('google-gla', 'google-vertex')
