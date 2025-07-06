@@ -16,21 +16,31 @@ def split_content_into_text_and_thinking(content: str) -> list[ThinkingPart | Te
     something else, we just match the tag to make it easier for other models that don't support the `ThinkingPart`.
     """
     parts: list[ThinkingPart | TextPart] = []
+    # Optimize by processing the string in one pass
+    tag_len = len(START_THINK_TAG)
+    end_tag_len = len(END_THINK_TAG)
+    idx = 0
+    content_len = len(content)
 
-    start_index = content.find(START_THINK_TAG)
-    while start_index >= 0:
-        before_think, content = content[:start_index], content[start_index + len(START_THINK_TAG) :]
-        if before_think:
-            parts.append(TextPart(content=before_think))
-        end_index = content.find(END_THINK_TAG)
+    while idx < content_len:
+        start_index = content.find(START_THINK_TAG, idx)
+        if start_index < 0:
+            # No more <think>, everything left is plain text
+            if idx < content_len:
+                parts.append(TextPart(content=content[idx:]))
+            break
+
+        if start_index > idx:
+            parts.append(TextPart(content=content[idx:start_index]))
+
+        after_think = start_index + tag_len
+        end_index = content.find(END_THINK_TAG, after_think)
         if end_index >= 0:
-            think_content, content = content[:end_index], content[end_index + len(END_THINK_TAG) :]
-            parts.append(ThinkingPart(content=think_content))
+            parts.append(ThinkingPart(content=content[after_think:end_index]))
+            idx = end_index + end_tag_len
         else:
-            # We lose the `<think>` tag, but it shouldn't matter.
-            parts.append(TextPart(content=content))
-            content = ''
-        start_index = content.find(START_THINK_TAG)
-    if content:
-        parts.append(TextPart(content=content))
+            # unmatched <think>; treat the rest as plain text as before
+            parts.append(TextPart(content=content[after_think:]))
+            break
+
     return parts
