@@ -316,7 +316,7 @@ def dataclasses_no_defaults_repr(self: Any) -> str:
 
 
 def number_to_datetime(x: int | float) -> datetime:
-    return TypeAdapter(datetime).validate_python(x)
+    return _datetime_adapter.validate_python(x)
 
 
 AwaitableCallable = Callable[..., Awaitable[T]]
@@ -453,3 +453,6 @@ def get_union_args(tp: Any) -> tuple[Any, ...]:
         return get_args(tp)
     else:
         return ()
+
+
+_datetime_adapter = TypeAdapter(datetime)
