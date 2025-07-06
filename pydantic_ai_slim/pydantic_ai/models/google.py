@@ -8,6 +8,7 @@ from datetime import datetime
 from typing import Any, Literal, Union, cast, overload
 from uuid import uuid4
 
+from google.genai.types import ContentDict, FunctionCallDict, PartDict
 from typing_extensions import assert_never
 
 from .. import UnexpectedModelBehavior, _utils, usage
@@ -470,22 +471,22 @@ class GeminiStreamedResponse(StreamedResponse):
 
 
 def _content_model_response(m: ModelResponse) -> ContentDict:
-    parts: list[PartDict] = []
+    # Pre-bind for speed inside tight loop
+    append = parts_append = []
     for item in m.parts:
-        if isinstance(item, ToolCallPart):
+        if type(item) is ToolCallPart:
+            # type(item) saves one attribute lookup vs isinstance
             function_call = FunctionCallDict(name=item.tool_name, args=item.args_as_dict(), id=item.tool_call_id)
-            parts.append({'function_call': function_call})
-        elif isinstance(item, TextPart):
+            parts_append.append({'function_call': function_call})
+        elif type(item) is TextPart:
             if item.content:  # pragma: no branch
-                parts.append({'text': item.content})
-        elif isinstance(item, ThinkingPart):  # pragma: no cover
-            # NOTE: We don't send ThinkingPart to the providers yet. If you are unsatisfied with this,
-            # please open an issue. The below code is the code to send thinking to the provider.
-            # parts.append({'text': item.content, 'thought': True})
+                parts_append.append({'text': item.content})
+        elif type(item) is ThinkingPart:  # pragma: no cover
+            # Note: See comment in original for provider thinking part.
             pass
         else:
             assert_never(item)
-    return ContentDict(role='model', parts=parts)
+    return ContentDict(role='model', parts=parts_append)
 
 
 def _process_response_from_parts(
