@@ -309,10 +309,14 @@ def get_traceparent(x: AgentRun | AgentRunResult | GraphRun | GraphRunResult) ->
 
 def dataclasses_no_defaults_repr(self: Any) -> str:
     """Exclude fields with values equal to the field default."""
-    kv_pairs = (
-        f'{f.name}={getattr(self, f.name)!r}' for f in fields(self) if f.repr and getattr(self, f.name) != f.default
-    )
-    return f'{self.__class__.__qualname__}({", ".join(kv_pairs)})'
+    cls_qualname = self.__class__.__qualname__  # Avoid repeating lookups
+    pairs = []
+    for f in fields(self):
+        if f.repr:
+            value = getattr(self, f.name)
+            if value != f.default:
+                pairs.append(f'{f.name}={value!r}')
+    return f'{cls_qualname}({", ".join(pairs)})'
 
 
 def number_to_datetime(x: int | float) -> datetime:
