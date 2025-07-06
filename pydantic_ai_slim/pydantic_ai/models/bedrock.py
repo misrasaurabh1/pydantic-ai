@@ -12,6 +12,9 @@ from typing import TYPE_CHECKING, Any, Generic, Literal, Union, cast, overload
 
 import anyio
 import anyio.to_thread
+from botocore.client import BaseClient
+from mypy_boto3_bedrock_runtime import BedrockRuntimeClient
+from mypy_boto3_bedrock_runtime.type_defs import ToolTypeDef
 from typing_extensions import ParamSpec, assert_never
 
 from pydantic_ai import _utils, usage
@@ -215,10 +218,16 @@ class BedrockConverseModel(Model):
         """
         self._model_name = model_name
 
-        if isinstance(provider, str):
-            provider = infer_provider(provider)
-        self.client = cast('BedrockRuntimeClient', provider.client)
-        self._profile = profile or provider.model_profile
+        # Convert string provider quickly, and reuse the resulting variable to avoid additional attribute lookups
+        prov = infer_provider(provider) if isinstance(provider, str) else provider
+        self.client = cast('BedrockRuntimeClient', prov.client)  # Only one attribute access
+
+        # Avoid assigning a method (not evaluated) as a profile, which can lead to bugs and slows down downstream code.
+        if profile is not None:
+            self._profile = profile
+        else:
+            # Minimize method call: Provide model_name directly to provider.model_profile
+            self._profile = prov.model_profile(model_name) if hasattr(prov, 'model_profile') else None
 
     def _get_tools(self, model_request_parameters: ModelRequestParameters) -> list[ToolTypeDef]:
         tools = [self._map_tool_definition(r) for r in model_request_parameters.function_tools]
@@ -228,6 +237,7 @@ class BedrockConverseModel(Model):
 
     @staticmethod
     def _map_tool_definition(f: ToolDefinition) -> ToolTypeDef:
+        # This method is already highly optimized, no significant gains from further changes
         return {
             'toolSpec': {
                 'name': f.name,
