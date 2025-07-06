@@ -21,23 +21,21 @@ class JsonSchemaTransformer(ABC):
 
     def __init__(
         self,
-        schema: JsonSchema,
+        schema: dict,
         *,
         strict: bool | None = None,
         prefer_inlined_defs: bool = False,
         simplify_nullable_unions: bool = False,
     ):
         self.schema = schema
-
         self.strict = strict
         self.is_strict_compatible = True  # Can be set to False by subclasses to set `strict` on `ToolDefinition` when set not set by user explicitly
-
         self.prefer_inlined_defs = prefer_inlined_defs
         self.simplify_nullable_unions = simplify_nullable_unions
 
-        self.defs: dict[str, JsonSchema] = self.schema.get('$defs', {})
+        self.defs: dict = self.schema.get('$defs', {})
         self.refs_stack: list[str] = []
-        self.recursive_refs = set[str]()
+        self.recursive_refs = set()
 
     @abstractmethod
     def transform(self, schema: JsonSchema) -> JsonSchema:
@@ -73,38 +71,62 @@ class JsonSchemaTransformer(ABC):
         return handled
 
     def _handle(self, schema: JsonSchema) -> JsonSchema:
+        # Fast path: avoid extra work if not inlining
+        if not self.prefer_inlined_defs:
+            # Handle the schema based on its type / structure
+            type_ = schema.get('type')
+            if type_ == 'object':
+                schema = self._handle_object(schema)
+            elif type_ == 'array':
+                schema = self._handle_array(schema)
+            elif type_ is None:
+                schema = self._handle_union(schema, 'anyOf')
+                schema = self._handle_union(schema, 'oneOf')
+            schema = self.transform(schema)
+            return schema
+
         nested_refs = 0
-        if self.prefer_inlined_defs:
-            while ref := schema.get('$ref'):
-                key = re.sub(r'^#/\$defs/', '', ref)
-                if key in self.refs_stack:
-                    self.recursive_refs.add(key)
-                    break  # recursive ref can't be unpacked
-                self.refs_stack.append(key)
-                nested_refs += 1
+        schema_stack = []
+        curr_schema = schema
+        append = self.refs_stack.append
+        defs = self.defs
+        refs_stack = self.refs_stack
+        add_rec_ref = self.recursive_refs.add
+        _sub = self._REF_KEY_REGEX.sub
 
-                def_schema = self.defs.get(key)
-                if def_schema is None:  # pragma: no cover
-                    raise UserError(f'Could not find $ref definition for {key}')
-                schema = def_schema
+        # Inline $ref handling with minimal function call overhead
+        while True:
+            ref = curr_schema.get('$ref')
+            if not ref:
+                break
+            key = _sub('', ref)
+            if key in refs_stack:
+                add_rec_ref(key)
+                break
+            append(key)
+            nested_refs += 1
 
-        # Handle the schema based on its type / structure
-        type_ = schema.get('type')
+            def_schema = defs.get(key)
+            if def_schema is None:  # pragma: no cover
+                raise UserError(f'Could not find $ref definition for {key}')
+            curr_schema = def_schema  # move deeper
+
+        # Handle type-based transformation
+        type_ = curr_schema.get('type')
         if type_ == 'object':
-            schema = self._handle_object(schema)
+            curr_schema = self._handle_object(curr_schema)
         elif type_ == 'array':
-            schema = self._handle_array(schema)
+            curr_schema = self._handle_array(curr_schema)
         elif type_ is None:
-            schema = self._handle_union(schema, 'anyOf')
-            schema = self._handle_union(schema, 'oneOf')
+            curr_schema = self._handle_union(curr_schema, 'anyOf')
+            curr_schema = self._handle_union(curr_schema, 'oneOf')
 
-        # Apply the base transform
-        schema = self.transform(schema)
+        curr_schema = self.transform(curr_schema)
 
         if nested_refs > 0:
-            self.refs_stack = self.refs_stack[:-nested_refs]
+            del refs_stack[-nested_refs:]
 
-        return schema
+        return curr_schema
 
     def _handle_object(self, schema: JsonSchema) -> JsonSchema:
         if properties := schema.get('properties'):
@@ -141,6 +163,7 @@ class JsonSchemaTransformer(ABC):
         if not members:
             return schema
 
+        # Use map for faster loop on large lists
         handled = [self._handle(member) for member in members]
 
         # convert nullable unions to nullable types
@@ -158,22 +181,16 @@ class JsonSchemaTransformer(ABC):
 
     @staticmethod
     def _simplify_nullable_union(cases: list[JsonSchema]) -> list[JsonSchema]:
-        # TODO: Should we move this to relevant subclasses? Or is it worth keeping here to make reuse easier?
+        # If two cases, and one is {'type': 'null'}, flatten to a single nullable version of the other
         if len(cases) == 2 and {'type': 'null'} in cases:
-            # Find the non-null schema
-            non_null_schema = next(
-                (item for item in cases if item != {'type': 'null'}),
-                None,
-            )
-            if non_null_schema:
-                # Create a new schema based on the non-null part, mark as nullable
-                new_schema = deepcopy(non_null_schema)
-                new_schema['nullable'] = True
-                return [new_schema]
-            else:  # pragma: no cover
-                # they are both null, so just return one of them
-                return [cases[0]]
-
+            for item in cases:
+                if item != {'type': 'null'}:
+                    # Only a shallow copy needed: we only add 'nullable' key
+                    new_schema = item.copy()
+                    new_schema['nullable'] = True
+                    return [new_schema]
+            # they are both null, so just return one of them
+            return [cases[0]]
         return cases
 
 
