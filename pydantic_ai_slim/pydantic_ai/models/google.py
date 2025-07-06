@@ -8,6 +8,7 @@ from datetime import datetime
 from typing import Any, Literal, Union, cast, overload
 from uuid import uuid4
 
+from google.genai.types import FunctionCallingConfigMode, ToolConfigDict
 from typing_extensions import assert_never
 
 from .. import UnexpectedModelBehavior, _utils, usage
@@ -49,7 +50,6 @@ try:
         ContentDict,
         ContentUnionDict,
         FunctionCallDict,
-        FunctionCallingConfigDict,
         FunctionCallingConfigMode,
         FunctionDeclarationDict,
         GenerateContentConfigDict,
@@ -528,9 +528,13 @@ def _function_declaration_from_tool(tool: ToolDefinition) -> FunctionDeclaration
 
 
 def _tool_config(function_names: list[str]) -> ToolConfigDict:
-    mode = FunctionCallingConfigMode.ANY
-    function_calling_config = FunctionCallingConfigDict(mode=mode, allowed_function_names=function_names)
-    return ToolConfigDict(function_calling_config=function_calling_config)
+    # Direct construction if the *Dict are just type aliases to dict
+    return {
+        'function_calling_config': {
+            'mode': FunctionCallingConfigMode.ANY,
+            'allowed_function_names': function_names,
+        }
+    }
 
 
 def _metadata_as_usage(response: GenerateContentResponse) -> usage.Usage:
