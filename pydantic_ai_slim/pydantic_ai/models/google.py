@@ -8,6 +8,7 @@ from datetime import datetime
 from typing import Any, Literal, Union, cast, overload
 from uuid import uuid4
 
+from google.genai.types import Part
 from typing_extensions import assert_never
 
 from .. import UnexpectedModelBehavior, _utils, usage
@@ -495,23 +496,40 @@ def _process_response_from_parts(
     vendor_id: str | None,
     vendor_details: dict[str, Any] | None = None,
 ) -> ModelResponse:
+    # Pre-bind constructors for speed
+    ThinkingPart_ = ThinkingPart
+    TextPart_ = TextPart
+    ToolCallPart_ = ToolCallPart
+    append = [].append  # dummy list for method type match
+
     items: list[ModelResponsePart] = []
+    items_append = items.append  # Bind local
+
     for part in parts:
-        if part.text is not None:
+        text = part.text
+        if text is not None:
             if part.thought:
-                items.append(ThinkingPart(content=part.text))
+                items_append(ThinkingPart_(text))
             else:
-                items.append(TextPart(content=part.text))
-        elif part.function_call:
-            assert part.function_call.name is not None
-            tool_call_part = ToolCallPart(tool_name=part.function_call.name, args=part.function_call.args)
-            if part.function_call.id is not None:
-                tool_call_part.tool_call_id = part.function_call.id  # pragma: no cover
-            items.append(tool_call_part)
-        elif part.function_response:  # pragma: no cover
+                items_append(TextPart_(text))
+            continue  # Skip rest
+
+        function_call = part.function_call
+        if function_call:
+            name = function_call.name
+            assert name is not None
+            tool_call_part = ToolCallPart_(name, function_call.args)
+            id_ = function_call.id
+            if id_ is not None:
+                tool_call_part.tool_call_id = id_  # pragma: no cover
+            items_append(tool_call_part)
+            continue
+
+        if part.function_response:  # pragma: no cover
             raise UnexpectedModelBehavior(
                 f'Unsupported response from Gemini, expected all parts to be function calls or text, got: {part!r}'
             )
+
     return ModelResponse(
         parts=items, model_name=model_name, usage=usage, vendor_id=vendor_id, vendor_details=vendor_details
     )
