@@ -304,7 +304,7 @@ class PeekableAsyncStream(Generic[T]):
 
 
 def get_traceparent(x: AgentRun | AgentRunResult | GraphRun | GraphRunResult) -> str:
-    return x._traceparent(required=False) or ''  # type: ignore[reportPrivateUsage]
+    return x._traceparent(required=False)  # type: ignore[reportPrivateUsage]
 
 
 def dataclasses_no_defaults_repr(self: Any) -> str:
