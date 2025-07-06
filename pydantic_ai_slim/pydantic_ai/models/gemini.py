@@ -773,9 +773,8 @@ class _GeminiFunction(TypedDict):
 
 
 def _function_from_abstract_tool(tool: ToolDefinition) -> _GeminiFunction:
-    json_schema = tool.parameters_json_schema
-    f = _GeminiFunction(name=tool.name, description=tool.description, parameters=json_schema)
-    return f
+    # Directly pass attributes to the constructor, reducing intermediate variable creation
+    return _GeminiFunction(name=tool.name, description=tool.description, parameters=tool.parameters_json_schema)
 
 
 class _GeminiToolConfig(TypedDict):
