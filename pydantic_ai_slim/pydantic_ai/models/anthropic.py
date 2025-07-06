@@ -8,6 +8,12 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Any, Literal, Union, cast, overload
 
+from anthropic.types.beta import (
+    BetaMessage,
+    BetaRawMessageDeltaEvent,
+    BetaRawMessageStartEvent,
+    BetaRawMessageStreamEvent,
+)
 from typing_extensions import assert_never
 
 from .. import ModelHTTPError, UnexpectedModelBehavior, _utils, usage
@@ -423,12 +429,12 @@ class AnthropicModel(Model):
 
 
 def _map_usage(message: BetaMessage | BetaRawMessageStreamEvent) -> usage.Usage:
-    if isinstance(message, BetaMessage):
+    # Avoid repeated isinstance() and attribute lookups
+    msg_type = type(message)
+    if msg_type is BetaMessage or msg_type is BetaRawMessageDeltaEvent:
         response_usage = message.usage
-    elif isinstance(message, BetaRawMessageStartEvent):
+    elif msg_type is BetaRawMessageStartEvent:
         response_usage = message.message.usage
-    elif isinstance(message, BetaRawMessageDeltaEvent):
-        response_usage = message.usage
     else:
         # No usage information provided in:
         # - RawMessageStopEvent
@@ -437,25 +443,23 @@ def _map_usage(message: BetaMessage | BetaRawMessageStreamEvent) -> usage.Usage:
         # - RawContentBlockStopEvent
         return usage.Usage()
 
-    # Store all integer-typed usage values in the details, except 'output_tokens' which is represented exactly by
-    # `response_tokens`
-    details: dict[str, int] = {
-        key: value for key, value in response_usage.model_dump().items() if isinstance(value, int)
-    }
+    model_dump = response_usage.model_dump()
+    # Pre-filter keys for addition (minimize .get lookups below)
+    # This also avoids an extra dict allocation for unused keys.
+    details = {k: v for k, v in model_dump.items() if isinstance(v, int)}
 
-    # Usage coming from the RawMessageDeltaEvent doesn't have input token data, hence using `get`
-    # Tokens are only counted once between input_tokens, cache_creation_input_tokens, and cache_read_input_tokens
-    # This approach maintains request_tokens as the count of all input tokens, with cached counts as details
-    request_tokens = (
-        details.get('input_tokens', 0)
-        + details.get('cache_creation_input_tokens', 0)
-        + details.get('cache_read_input_tokens', 0)
-    )
+    # Use local vars for integer fetches to avoid repeated dict access
+    in_tokens = details.get('input_tokens', 0)
+    cache_cr_tokens = details.get('cache_creation_input_tokens', 0)
+    cache_read_tokens = details.get('cache_read_input_tokens', 0)
+    request_tokens = in_tokens + cache_cr_tokens + cache_read_tokens
+
+    out_tokens = model_dump.get('output_tokens', 0)
 
     return usage.Usage(
         request_tokens=request_tokens or None,
-        response_tokens=response_usage.output_tokens,
-        total_tokens=request_tokens + response_usage.output_tokens,
+        response_tokens=out_tokens,
+        total_tokens=request_tokens + out_tokens,
         details=details or None,
     )
 
