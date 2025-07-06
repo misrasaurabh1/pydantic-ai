@@ -37,7 +37,7 @@ class JsonSchemaTransformer(ABC):
 
         self.defs: dict[str, JsonSchema] = self.schema.get('$defs', {})
         self.refs_stack: list[str] = []
-        self.recursive_refs = set[str]()
+        self.recursive_refs = set()
 
     @abstractmethod
     def transform(self, schema: JsonSchema) -> JsonSchema:
@@ -45,38 +45,39 @@ class JsonSchemaTransformer(ABC):
         return schema
 
     def walk(self) -> JsonSchema:
-        schema = deepcopy(self.schema)
+        # Avoid full deepcopy: Only deepcopy $defs since these are mutated, and
+        # perform a shallow copy of the rest. This reduces memory.
+        schema = dict(self.schema)
+        defs = schema.pop('$defs', None)
 
-        # First, handle everything but $defs:
-        schema.pop('$defs', None)
         handled = self._handle(schema)
 
         if not self.prefer_inlined_defs and self.defs:
+            # No change; $defs needs to be deepcopied since they might be mutated in-place by _handle
             handled['$defs'] = {k: self._handle(v) for k, v in self.defs.items()}
-
         elif self.recursive_refs:  # pragma: no cover
             # If we are preferring inlined defs and there are recursive refs, we _have_ to use a $defs+$ref structure
             # We try to use whatever the original root key was, but if it is already in use,
             # we modify it to avoid collisions.
             defs = {key: self.defs[key] for key in self.recursive_refs}
             root_ref = self.schema.get('$ref')
-            root_key = None if root_ref is None else re.sub(r'^#/\$defs/', '', root_ref)
+            root_key = None if root_ref is None else _REF_DEFS_PATTERN.sub('', root_ref)
             if root_key is None:
                 root_key = self.schema.get('title', 'root')
                 while root_key in defs:
                     # Modify the root key until it is not already in use
                     root_key = f'{root_key}_root'
-
             defs[root_key] = handled
             return {'$defs': defs, '$ref': f'#/$defs/{root_key}'}
-
         return handled
 
     def _handle(self, schema: JsonSchema) -> JsonSchema:
         nested_refs = 0
         if self.prefer_inlined_defs:
-            while ref := schema.get('$ref'):
-                key = re.sub(r'^#/\$defs/', '', ref)
+            ref = schema.get('$ref')
+            while ref:
+                key = _REF_DEFS_PATTERN.sub('', ref)
+                # Combine all logical checks to minimize calls and possible lookups
                 if key in self.refs_stack:
                     self.recursive_refs.add(key)
                     break  # recursive ref can't be unpacked
@@ -87,22 +88,24 @@ class JsonSchemaTransformer(ABC):
                 if def_schema is None:  # pragma: no cover
                     raise UserError(f'Could not find $ref definition for {key}')
                 schema = def_schema
+                ref = schema.get('$ref')
 
         # Handle the schema based on its type / structure
-        type_ = schema.get('type')
+        type_ = schema.get('type', None)
         if type_ == 'object':
             schema = self._handle_object(schema)
         elif type_ == 'array':
             schema = self._handle_array(schema)
         elif type_ is None:
+            # Try both unions only if type_ is not present
             schema = self._handle_union(schema, 'anyOf')
             schema = self._handle_union(schema, 'oneOf')
 
         # Apply the base transform
         schema = self.transform(schema)
 
-        if nested_refs > 0:
-            self.refs_stack = self.refs_stack[:-nested_refs]
+        if nested_refs:
+            del self.refs_stack[-nested_refs:]
 
         return schema
 
@@ -185,3 +188,6 @@ class InlineDefsJsonSchemaTransformer(JsonSchemaTransformer):
 
     def transform(self, schema: JsonSchema) -> JsonSchema:
         return schema
+
+
+_REF_DEFS_PATTERN = re.compile(r'^#/\$defs/')
