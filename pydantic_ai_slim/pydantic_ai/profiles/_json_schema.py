@@ -28,9 +28,8 @@ class JsonSchemaTransformer(ABC):
         simplify_nullable_unions: bool = False,
     ):
         self.schema = schema
-
         self.strict = strict
-        self.is_strict_compatible = True  # Can be set to False by subclasses to set `strict` on `ToolDefinition` when set not set by user explicitly
+        self.is_strict_compatible = True
 
         self.prefer_inlined_defs = prefer_inlined_defs
         self.simplify_nullable_unions = simplify_nullable_unions
@@ -73,10 +72,18 @@ class JsonSchemaTransformer(ABC):
         return handled
 
     def _handle(self, schema: JsonSchema) -> JsonSchema:
+        # Avoid regex, use efficient prefix-check and slicing for $ref handling
         nested_refs = 0
         if self.prefer_inlined_defs:
-            while ref := schema.get('$ref'):
-                key = re.sub(r'^#/\$defs/', '', ref)
+            ref = schema.get('$ref')
+            while ref is not None:
+                prefix = '#/$defs/'
+                if ref.startswith(prefix):
+                    key = ref[len(prefix) :]
+                else:
+                    # Fallback to regex only if prefix not found, which is rare
+                    key = re.sub(r'^#/\$defs/', '', ref)
+                # Use a set for faster "already recursing" checks
                 if key in self.refs_stack:
                     self.recursive_refs.add(key)
                     break  # recursive ref can't be unpacked
@@ -87,8 +94,8 @@ class JsonSchemaTransformer(ABC):
                 if def_schema is None:  # pragma: no cover
                     raise UserError(f'Could not find $ref definition for {key}')
                 schema = def_schema
+                ref = schema.get('$ref')
 
-        # Handle the schema based on its type / structure
         type_ = schema.get('type')
         if type_ == 'object':
             schema = self._handle_object(schema)
@@ -98,41 +105,68 @@ class JsonSchemaTransformer(ABC):
             schema = self._handle_union(schema, 'anyOf')
             schema = self._handle_union(schema, 'oneOf')
 
-        # Apply the base transform
         schema = self.transform(schema)
 
         if nested_refs > 0:
-            self.refs_stack = self.refs_stack[:-nested_refs]
+            del self.refs_stack[-nested_refs:]
 
         return schema
 
     def _handle_object(self, schema: JsonSchema) -> JsonSchema:
-        if properties := schema.get('properties'):
-            handled_properties = {}
+        # Properties
+        properties = schema.get('properties')
+        if properties:
+            handled_properties = None
+            # Only create new dict if at least one property changes
             for key, value in properties.items():
-                handled_properties[key] = self._handle(value)
-            schema['properties'] = handled_properties
+                handled_value = self._handle(value)
+                if handled_value is not value:
+                    if handled_properties is None:
+                        handled_properties = properties.copy()
+                    handled_properties[key] = handled_value
+            if handled_properties is not None:
+                schema['properties'] = handled_properties
 
-        if (additional_properties := schema.get('additionalProperties')) is not None:
-            if isinstance(additional_properties, bool):
-                schema['additionalProperties'] = additional_properties
-            else:
-                schema['additionalProperties'] = self._handle(additional_properties)
+        # AdditionalProperties
+        additional_properties = schema.get('additionalProperties')
+        if additional_properties is not None and not isinstance(additional_properties, bool):
+            handled = self._handle(additional_properties)
+            if handled is not additional_properties:
+                schema['additionalProperties'] = handled
 
-        if (pattern_properties := schema.get('patternProperties')) is not None:
-            handled_pattern_properties = {}
+        # PatternProperties
+        pattern_properties = schema.get('patternProperties')
+        if pattern_properties is not None:
+            handled_pattern_properties = None
             for key, value in pattern_properties.items():
-                handled_pattern_properties[key] = self._handle(value)
-            schema['patternProperties'] = handled_pattern_properties
+                handled_value = self._handle(value)
+                if handled_value is not value:
+                    if handled_pattern_properties is None:
+                        handled_pattern_properties = pattern_properties.copy()
+                    handled_pattern_properties[key] = handled_value
+            if handled_pattern_properties is not None:
+                schema['patternProperties'] = handled_pattern_properties
 
         return schema
 
     def _handle_array(self, schema: JsonSchema) -> JsonSchema:
-        if prefix_items := schema.get('prefixItems'):
-            schema['prefixItems'] = [self._handle(item) for item in prefix_items]
+        prefix_items = schema.get('prefixItems')
+        if prefix_items:
+            updated_items = None
+            for i, item in enumerate(prefix_items):
+                handled_item = self._handle(item)
+                if handled_item is not item:
+                    if updated_items is None:
+                        updated_items = list(prefix_items)
+                    updated_items[i] = handled_item
+            if updated_items is not None:
+                schema['prefixItems'] = updated_items
 
-        if items := schema.get('items'):
-            schema['items'] = self._handle(items)
+        items = schema.get('items')
+        if items:
+            handled_items = self._handle(items)
+            if handled_items is not items:
+                schema['items'] = handled_items
 
         return schema
 
@@ -141,19 +175,30 @@ class JsonSchemaTransformer(ABC):
         if not members:
             return schema
 
-        handled = [self._handle(member) for member in members]
+        # No need to copy schema unless something changes
+        handled = None
+        for i, member in enumerate(members):
+            handled_member = self._handle(member)
+            if handled_member is not member:
+                if handled is None:
+                    handled = list(members)
+                handled[i] = handled_member
+        final_handled = handled if handled is not None else members
 
         # convert nullable unions to nullable types
         if self.simplify_nullable_unions:
-            handled = self._simplify_nullable_union(handled)
+            simplified_handled = self._simplify_nullable_union(final_handled)
+            if simplified_handled is not final_handled:
+                final_handled = simplified_handled
 
-        if len(handled) == 1:
-            # In this case, no need to retain the union
-            return handled[0]
+        if len(final_handled) == 1:
+            return final_handled[0]
 
-        # If we have keys besides the union kind (such as title or discriminator), keep them without modifications
-        schema = schema.copy()
-        schema[union_kind] = handled
+        # Only copy schema if any change occurred
+        if handled is not None or (self.simplify_nullable_unions and simplified_handled is not handled):
+            schema = schema.copy()
+            schema[union_kind] = final_handled
+
         return schema
 
     @staticmethod
