@@ -6,7 +6,7 @@ from collections.abc import Sequence
 from dataclasses import dataclass, field, replace
 from datetime import datetime
 from mimetypes import guess_type
-from typing import TYPE_CHECKING, Annotated, Any, Literal, Union, cast, overload
+from typing import TYPE_CHECKING, Annotated, Any, Literal, Union, overload
 
 import pydantic
 import pydantic_core
@@ -624,13 +624,15 @@ class ToolCallPart:
 
         This is just for convenience with models that require dicts as input.
         """
-        if not self.args:
+        args = self.args
+        if not args:
             return {}
-        if isinstance(self.args, dict):
-            return self.args
-        args = pydantic_core.from_json(self.args)
-        assert isinstance(args, dict), 'args should be a dict'
-        return cast(dict[str, Any], args)
+        if isinstance(args, dict):
+            return args
+        # Parse JSON string only when necessary
+        result = pydantic_core.from_json(args)
+        assert isinstance(result, dict), 'args should be a dict'
+        return result  # type: ignore[return-value]
 
     def args_as_json_str(self) -> str:
         """Return the arguments as a JSON string.
