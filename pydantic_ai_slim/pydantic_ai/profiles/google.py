@@ -33,9 +33,7 @@ class GoogleJsonSchemaTransformer(JsonSchemaTransformer):
 
     def transform(self, schema: JsonSchema) -> JsonSchema:
         # Note: we need to remove `additionalProperties: False` since it is currently mishandled by Gemini
-        additional_properties = schema.pop(
-            'additionalProperties', None
-        )  # don't pop yet so it's included in the warning
+        additional_properties = schema.pop('additionalProperties', None)
         if additional_properties:
             original_schema = {**schema, 'additionalProperties': additional_properties}
             warnings.warn(
@@ -48,23 +46,26 @@ class GoogleJsonSchemaTransformer(JsonSchemaTransformer):
                 UserWarning,
             )
 
-        schema.pop('title', None)
-        schema.pop('default', None)
-        schema.pop('$schema', None)
+        # Batch pop all irrelevant fields in a single loop for minimal overhead
+        # (this is a minimal gain/runtime, but for completeness and clean code)
+        for k in (
+            'title',
+            'default',
+            '$schema',
+            'discriminator',
+            'examples',
+            'exclusiveMaximum',
+            'exclusiveMinimum',
+        ):
+            schema.pop(k, None)
+
         if (const := schema.pop('const', None)) is not None:
             # Gemini doesn't support const, but it does support enum with a single value
             schema['enum'] = [const]
-        schema.pop('discriminator', None)
-        schema.pop('examples', None)
-
-        # TODO: Should we use the trick from pydantic_ai.models.openai._OpenAIJsonSchema
-        #   where we add notes about these properties to the field description?
-        schema.pop('exclusiveMaximum', None)
-        schema.pop('exclusiveMinimum', None)
 
         # Gemini only supports string enums, so we need to convert any enum values to strings.
-        # Pydantic will take care of transforming the transformed string values to the correct type.
-        if enum := schema.get('enum'):
+        enum = schema.get('enum')
+        if enum:
             schema['type'] = 'string'
             schema['enum'] = [str(val) for val in enum]
 
@@ -75,12 +76,14 @@ class GoogleJsonSchemaTransformer(JsonSchemaTransformer):
             # Changing the oneOf to an anyOf prevents the API error and I think is functionally equivalent
             schema['anyOf'] = schema.pop('oneOf')
 
-        if type_ == 'string' and (fmt := schema.pop('format', None)):
-            description = schema.get('description')
-            if description:
-                schema['description'] = f'{description} (format: {fmt})'
-            else:
-                schema['description'] = f'Format: {fmt}'
+        if type_ == 'string':
+            fmt = schema.pop('format', None)
+            if fmt:
+                description = schema.get('description')
+                if description:
+                    schema['description'] = f'{description} (format: {fmt})'
+                else:
+                    schema['description'] = f'Format: {fmt}'
 
         if '$ref' in schema:
             raise UserError(f'Recursive `$ref`s in JSON Schema are not supported by Gemini: {schema["$ref"]}')
@@ -89,10 +92,18 @@ class GoogleJsonSchemaTransformer(JsonSchemaTransformer):
             # prefixItems is not currently supported in Gemini, so we convert it to items for best compatibility
             prefix_items = schema.pop('prefixItems')
             items = schema.get('items')
+
+            # OPTIMIZED: Use set to avoid O(N^2) list membership test; preserves order of prefix_items
             unique_items = [items] if items is not None else []
+            seen = set()
+            if items is not None:
+                seen.add(self._item_hashable(items))
             for item in prefix_items:
-                if item not in unique_items:
+                item_hash = self._item_hashable(item)
+                if item_hash not in seen:
                     unique_items.append(item)
+                    seen.add(item_hash)
+
             if len(unique_items) > 1:  # pragma: no cover
                 schema['items'] = {'anyOf': unique_items}
             elif len(unique_items) == 1:  # pragma: no branch
@@ -102,3 +113,17 @@ class GoogleJsonSchemaTransformer(JsonSchemaTransformer):
                 schema.setdefault('maxItems', len(prefix_items))
 
         return schema
+
+    @staticmethod
+    def _item_hashable(item):
+        # Helper: dicts are not hashable; convert to tuple of sorted items,
+        # fallback to id if not dict, to allow set-based duplicate detection.
+        if isinstance(item, dict):
+            # Items in JSON schema dicts are also always str:Any
+            return tuple(sorted(item.items()))
+        try:
+            hash(item)
+            return item
+        except TypeError:
+            # Should not occur, but in case of nested unhashable types
+            return id(item)
