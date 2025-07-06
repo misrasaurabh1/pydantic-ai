@@ -783,9 +783,9 @@ class _GeminiToolConfig(TypedDict):
 
 
 def _tool_config(function_names: list[str]) -> _GeminiToolConfig:
-    return _GeminiToolConfig(
-        function_calling_config=_GeminiFunctionCallingConfig(mode='ANY', allowed_function_names=function_names)
-    )
+    # Separate object allocation for better performance
+    config = _GeminiFunctionCallingConfig(mode='ANY', allowed_function_names=function_names)
+    return _GeminiToolConfig(function_calling_config=config)
 
 
 class _GeminiFunctionCallingConfig(TypedDict):
