@@ -35,12 +35,9 @@ class JsonSchemaTransformer(ABC):
         self.prefer_inlined_defs = prefer_inlined_defs
         self.simplify_nullable_unions = simplify_nullable_unions
 
-        # self.defs: dict[str, JsonSchema] = self.schema.get('$defs', {})
-        self.defs = self.schema.get('$defs', {})
-        # self.refs_stack: list[str] = []
-        self.refs_stack = []
-        # self.recursive_refs = set[str]()
-        self.recursive_refs = set()
+        self.defs: dict[str, JsonSchema] = self.schema.get('$defs', {})
+        self.refs_stack: list[str] = []
+        self.recursive_refs = set[str]()
 
     @abstractmethod
     def transform(self, schema: JsonSchema) -> JsonSchema:
