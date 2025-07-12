@@ -645,12 +645,12 @@ class ToolCallPart:
 
     def has_content(self) -> bool:
         """Return `True` if the arguments contain any data."""
-        if isinstance(self.args, dict):
+        args = self.args
+        if isinstance(args, dict):
             # TODO: This should probably return True if you have the value False, or 0, etc.
             #   It makes sense to me to ignore empty strings, but not sure about empty lists or dicts
-            return any(self.args.values())
-        else:
-            return bool(self.args)
+            return any(args.values())
+        return bool(args)
 
     __repr__ = _utils.dataclasses_no_defaults_repr
 
