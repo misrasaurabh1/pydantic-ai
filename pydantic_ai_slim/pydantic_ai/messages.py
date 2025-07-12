@@ -759,9 +759,11 @@ class TextPartDelta:
         Raises:
             ValueError: If `part` is not a `TextPart`.
         """
+        # Fast-path: build new TextPart directly
         if not isinstance(part, TextPart):
             raise ValueError('Cannot apply TextPartDeltas to non-TextParts')  # pragma: no cover
-        return replace(part, content=part.content + self.content_delta)
+        # Construct new instance, assuming TextPart has two required fields: content and part_kind
+        return type(part)(content=part.content + self.content_delta, part_kind=part.part_kind)
 
     __repr__ = _utils.dataclasses_no_defaults_repr
 
