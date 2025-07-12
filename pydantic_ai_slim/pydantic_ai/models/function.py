@@ -16,19 +16,17 @@ from pydantic_ai.profiles import ModelProfileSpec
 from .. import _utils, usage
 from .._utils import PeekableAsyncStream
 from ..messages import (
-    AudioUrl,
     BinaryContent,
-    ImageUrl,
     ModelMessage,
     ModelRequest,
     ModelResponse,
     ModelResponseStreamEvent,
-    RetryPromptPart,
+    RetryPromptPart as _RetryPromptPart,
     SystemPromptPart,
     TextPart,
     ThinkingPart,
-    ToolCallPart,
-    ToolReturnPart,
+    ToolCallPart as _ToolCallPart,
+    ToolReturnPart as _ToolReturnPart,
     UserContent,
     UserPromptPart,
 )
@@ -269,17 +267,17 @@ def _estimate_usage(messages: Iterable[ModelMessage]) -> usage.Usage:
 
     This is designed to be used solely to give plausible numbers for testing!
     """
-    # there seem to be about 50 tokens of overhead for both Gemini and OpenAI calls, so add that here ¯\_(ツ)_/¯
-    request_tokens = 50
+    request_tokens = 50  # empirically determined request overhead
     response_tokens = 0
+
     for message in messages:
         if isinstance(message, ModelRequest):
             for part in message.parts:
                 if isinstance(part, (SystemPromptPart, UserPromptPart)):
                     request_tokens += _estimate_string_tokens(part.content)
-                elif isinstance(part, ToolReturnPart):
+                elif isinstance(part, _ToolReturnPart):
                     request_tokens += _estimate_string_tokens(part.model_response_str())
-                elif isinstance(part, RetryPromptPart):
+                elif isinstance(part, _RetryPromptPart):
                     request_tokens += _estimate_string_tokens(part.model_response())
                 else:
                     assert_never(part)
@@ -288,12 +286,9 @@ def _estimate_usage(messages: Iterable[ModelMessage]) -> usage.Usage:
                 if isinstance(part, TextPart):
                     response_tokens += _estimate_string_tokens(part.content)
                 elif isinstance(part, ThinkingPart):
-                    # NOTE: We don't send ThinkingPart to the providers yet.
-                    # If you are unsatisfied with this, please open an issue.
-                    pass
-                elif isinstance(part, ToolCallPart):
-                    call = part
-                    response_tokens += 1 + _estimate_string_tokens(call.args_as_json_str())
+                    pass  # No-op as per original
+                elif isinstance(part, _ToolCallPart):
+                    response_tokens += 1 + _estimate_string_tokens(part.args_as_json_str())
                 else:
                     assert_never(part)
         else:
@@ -306,20 +301,26 @@ def _estimate_usage(messages: Iterable[ModelMessage]) -> usage.Usage:
 
 
 def _estimate_string_tokens(content: str | Sequence[UserContent]) -> int:
+    """Estimate tokens in a string or list of UserContent."""
     if not content:
         return 0
     if isinstance(content, str):
-        return len(re.split(r'[\s",.:]+', content.strip()))
-    else:
-        tokens = 0
-        for part in content:
-            if isinstance(part, str):
-                tokens += len(re.split(r'[\s",.:]+', part.strip()))
-            # TODO(Marcelo): We need to study how we can estimate the tokens for these types of content.
-            if isinstance(part, (AudioUrl, ImageUrl)):
-                tokens += 0
-            elif isinstance(part, BinaryContent):
-                tokens += len(part.data)
-            else:
-                tokens += 0
-        return tokens
+        s = content.strip()
+        if not s:
+            return 0
+        return len(_token_split_re.split(s))
+    # content is Sequence[UserContent]
+    tokens = 0
+    for part in content:
+        if isinstance(part, str):
+            s = part.strip()
+            if not s:
+                continue
+            tokens += len(_token_split_re.split(s))
+        elif isinstance(part, BinaryContent):
+            tokens += len(part.data)
+        # AudioUrl, ImageUrl, or unknown: tokens += 0 (skip)
+    return tokens
+
+
+_token_split_re = re.compile(r'[\s",.:]+')
