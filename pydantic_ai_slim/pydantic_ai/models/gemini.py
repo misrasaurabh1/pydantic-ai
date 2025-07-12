@@ -784,7 +784,7 @@ class _GeminiToolConfig(TypedDict):
 
 def _tool_config(function_names: list[str]) -> _GeminiToolConfig:
     return _GeminiToolConfig(
-        function_calling_config=_GeminiFunctionCallingConfig(mode='ANY', allowed_function_names=function_names)
+        function_calling_config=_GeminiFunctionCallingConfig(mode=_ANY_MODE, allowed_function_names=function_names)
     )
 
 
@@ -929,3 +929,6 @@ def _ensure_decodeable(content: bytearray) -> bytearray:
             content = content[:-1]  # this will definitely succeed before we run out of bytes
         else:
             return content
+
+
+_ANY_MODE = 'ANY'
