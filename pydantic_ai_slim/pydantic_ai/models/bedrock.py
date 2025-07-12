@@ -12,6 +12,9 @@ from typing import TYPE_CHECKING, Any, Generic, Literal, Union, cast, overload
 
 import anyio
 import anyio.to_thread
+from botocore.client import BaseClient
+from mypy_boto3_bedrock_runtime import BedrockRuntimeClient
+from mypy_boto3_bedrock_runtime.type_defs import ToolTypeDef
 from typing_extensions import ParamSpec, assert_never
 
 from pydantic_ai import _utils, usage
@@ -216,9 +219,13 @@ class BedrockConverseModel(Model):
         self._model_name = model_name
 
         if isinstance(provider, str):
-            provider = infer_provider(provider)
-        self.client = cast('BedrockRuntimeClient', provider.client)
-        self._profile = profile or provider.model_profile
+            provider_inst = infer_provider(provider)
+        else:
+            provider_inst = provider
+        # Single client retrieval
+        self.client = cast('BedrockRuntimeClient', provider_inst.client)
+        # Directly resolve profile at init, avoids one attribute access layer
+        self._profile = profile or (provider_inst.model_profile if hasattr(provider_inst, 'model_profile') else None)
 
     def _get_tools(self, model_request_parameters: ModelRequestParameters) -> list[ToolTypeDef]:
         tools = [self._map_tool_definition(r) for r in model_request_parameters.function_tools]
@@ -228,6 +235,7 @@ class BedrockConverseModel(Model):
 
     @staticmethod
     def _map_tool_definition(f: ToolDefinition) -> ToolTypeDef:
+        # No change: this dictionary assembly is as tight as Python gets
         return {
             'toolSpec': {
                 'name': f.name,
