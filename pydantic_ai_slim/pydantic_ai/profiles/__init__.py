@@ -46,12 +46,19 @@ class ModelProfile:
         """Update this ModelProfile (subclass) instance with the non-default values from another ModelProfile instance."""
         if not profile:
             return self
-        field_names = set(f.name for f in fields(self))
-        non_default_attrs = {
-            f.name: getattr(profile, f.name)
-            for f in fields(profile)
-            if f.name in field_names and getattr(profile, f.name) != f.default
-        }
+        # Precompute our own fields for fast lookup without set allocation
+        # This is cheaper and fields() is fast for dataclasses
+        own_field_defaults = {f.name: f.default for f in fields(self)}
+        # Compute which fields to update
+        non_default_attrs = {}
+        for f in fields(profile):
+            if f.name in own_field_defaults:
+                v = getattr(profile, f.name)
+                # Only update if the incoming value is not default
+                if v != f.default:
+                    non_default_attrs[f.name] = v
+        if not non_default_attrs:
+            return self
         return replace(self, **non_default_attrs)
 
 
