@@ -4,7 +4,6 @@ import warnings
 
 from pydantic_ai.exceptions import UserError
 
-from . import ModelProfile
 from ._json_schema import JsonSchema, JsonSchemaTransformer
 
 

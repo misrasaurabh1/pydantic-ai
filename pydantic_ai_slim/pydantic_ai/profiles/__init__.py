@@ -1,6 +1,6 @@
 from __future__ import annotations as _annotations
 
-from dataclasses import dataclass, fields, replace
+from dataclasses import Field, dataclass, fields, replace
 from textwrap import dedent
 from typing import Callable, Union
 
@@ -46,11 +46,26 @@ class ModelProfile:
         """Update this ModelProfile (subclass) instance with the non-default values from another ModelProfile instance."""
         if not profile:
             return self
-        field_names = set(f.name for f in fields(self))
+
+        # Optimization: Only compute defaults and fields needed once
+        # Build a map of field name to default for fast lookup, and avoid repeated getattr
+        # This avoids calling getattr(profile, ...) and f.default in the condition for every field.
+        self_fields = {f.name for f in fields(self)}
+        profile_fields = fields(profile)
+        profile_values = profile.__dict__
+        defaults = {f.name: f.default for f in profile_fields if isinstance(f, Field) or f.default is not None}
+        # Use __dataclass_fields__ to handle defaults for all data class fields robustly
+        defaults = {}
+        for f in profile_fields:
+            if f.default_factory is not dataclass._MISSING_TYPE:  # type: ignore
+                defaults[f.name] = f.default_factory()
+            elif f.default is not dataclass._MISSING_TYPE:
+                defaults[f.name] = f.default
+        # Only override values that are present in both and are not the default
         non_default_attrs = {
-            f.name: getattr(profile, f.name)
-            for f in fields(profile)
-            if f.name in field_names and getattr(profile, f.name) != f.default
+            fname: value
+            for fname, value in profile_values.items()
+            if fname in self_fields and fname in defaults and value != defaults[fname]
         }
         return replace(self, **non_default_attrs)
 

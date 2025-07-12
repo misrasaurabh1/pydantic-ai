@@ -1,6 +1,5 @@
 from __future__ import annotations as _annotations
 
-from . import ModelProfile
 from ._json_schema import InlineDefsJsonSchemaTransformer
 
 
