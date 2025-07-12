@@ -759,9 +759,11 @@ class TextPartDelta:
         Raises:
             ValueError: If `part` is not a `TextPart`.
         """
+        # Directly update TextPart, skip expensive dataclasses.replace
         if not isinstance(part, TextPart):
             raise ValueError('Cannot apply TextPartDeltas to non-TextParts')  # pragma: no cover
-        return replace(part, content=part.content + self.content_delta)
+        part.content += self.content_delta
+        return part
 
     __repr__ = _utils.dataclasses_no_defaults_repr
 
