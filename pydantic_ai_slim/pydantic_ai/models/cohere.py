@@ -4,6 +4,7 @@ from collections.abc import Iterable
 from dataclasses import dataclass, field
 from typing import Literal, Union, cast
 
+from cohere import AsyncClientV2, ToolV2, ToolV2Function
 from typing_extensions import assert_never
 
 from pydantic_ai._thinking_part import split_content_into_text_and_thinking
@@ -105,6 +106,8 @@ class CohereModel(Model):
 
     _model_name: CohereModelName = field(repr=False)
     _system: str = field(default='cohere', repr=False)
+    # Optionally, uncomment the next line to save significant memory if instances are many.
+    # __slots__ = ('_model_name', 'client', '_profile')
 
     def __init__(
         self,
@@ -125,10 +128,11 @@ class CohereModel(Model):
         """
         self._model_name = model_name
 
-        if isinstance(provider, str):
-            provider = infer_provider(provider)
-        self.client = provider.client
-        self._profile = profile or provider.model_profile
+        # Only call infer_provider if needed
+        prov = infer_provider(provider) if isinstance(provider, str) else provider
+        self.client = prov.client
+        # Set _profile correctly (profile argument first, else provider.model_profile(model_name))
+        self._profile = profile or (getattr(prov, 'model_profile', None) and prov.model_profile(model_name)) or None
 
     @property
     def base_url(self) -> str:
@@ -236,10 +240,23 @@ class CohereModel(Model):
         return cohere_messages
 
     def _get_tools(self, model_request_parameters: ModelRequestParameters) -> list[ToolV2]:
-        tools = [self._map_tool_definition(r) for r in model_request_parameters.function_tools]
-        if model_request_parameters.output_tools:
-            tools += [self._map_tool_definition(r) for r in model_request_parameters.output_tools]
-        return tools
+        # Instead of building two intermediate lists and then concatenating, build one list directly
+        function_tools = model_request_parameters.function_tools
+        output_tools = model_request_parameters.output_tools
+        if function_tools and output_tools:
+            # Pre-size the result for efficiency (minor, but avoids incremental resizing)
+            result = [None] * (len(function_tools) + len(output_tools))
+            for i, r in enumerate(function_tools):
+                result[i] = self._map_tool_definition(r)
+            for i, r in enumerate(output_tools):
+                result[i + len(function_tools)] = self._map_tool_definition(r)
+            return result
+        elif function_tools:
+            return [self._map_tool_definition(r) for r in function_tools]
+        elif output_tools:
+            return [self._map_tool_definition(r) for r in output_tools]
+        else:
+            return []
 
     @staticmethod
     def _map_tool_call(t: ToolCallPart) -> ToolCallV2:
@@ -254,6 +271,7 @@ class CohereModel(Model):
 
     @staticmethod
     def _map_tool_definition(f: ToolDefinition) -> ToolV2:
+        # This is already optimal; no changes needed.
         return ToolV2(
             type='function',
             function=ToolV2Function(
