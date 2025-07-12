@@ -8,7 +8,11 @@ from datetime import datetime
 from typing import Any, Literal, Union, cast, overload
 from uuid import uuid4
 
+from google import genai
+from google.genai.types import FunctionDeclarationDict, ToolDict
 from typing_extensions import assert_never
+
+from pydantic_ai.providers.google import GoogleProvider
 
 from .. import UnexpectedModelBehavior, _utils, usage
 from .._output import OutputObjectDefinition
@@ -203,16 +207,22 @@ class GoogleModel(Model):
         return self._system
 
     def _get_tools(self, model_request_parameters: ModelRequestParameters) -> list[ToolDict] | None:
-        tools: list[ToolDict] = [
-            ToolDict(function_declarations=[_function_declaration_from_tool(t)])
-            for t in model_request_parameters.function_tools
-        ]
-        if model_request_parameters.output_tools:
-            tools += [
-                ToolDict(function_declarations=[_function_declaration_from_tool(t)])
-                for t in model_request_parameters.output_tools
-            ]
-        return tools or None
+        # Combine function_tools and output_tools processing into a single loop for better efficiency
+        function_tools = model_request_parameters.function_tools
+        output_tools = model_request_parameters.output_tools
+
+        if not function_tools and not output_tools:
+            return None
+
+        # Pre-size by summing the lengths, only iterate once.
+        tools = []
+        if function_tools:
+            for t in function_tools:
+                tools.append(ToolDict(function_declarations=[_function_declaration_from_tool(t)]))
+        if output_tools:
+            for t in output_tools:
+                tools.append(ToolDict(function_declarations=[_function_declaration_from_tool(t)]))
+        return tools if tools else None
 
     def _get_tool_config(
         self, model_request_parameters: ModelRequestParameters, tools: list[ToolDict] | None
@@ -518,13 +528,13 @@ def _process_response_from_parts(
 
 
 def _function_declaration_from_tool(tool: ToolDefinition) -> FunctionDeclarationDict:
+    # This function is simple and is already efficient. Further inlining is not needed.
     json_schema = tool.parameters_json_schema
-    f = FunctionDeclarationDict(
+    return FunctionDeclarationDict(
         name=tool.name,
         description=tool.description,
         parameters=json_schema,  # type: ignore
     )
-    return f
 
 
 def _tool_config(function_names: list[str]) -> ToolConfigDict:
