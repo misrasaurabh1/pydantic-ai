@@ -1,7 +1,6 @@
 from __future__ import annotations as _annotations
 
 import os
-from typing import overload
 
 from httpx import AsyncClient as AsyncHTTPClient
 from openai import AsyncOpenAI
@@ -44,19 +43,99 @@ class DeepSeekProvider(Provider[AsyncOpenAI]):
         # we need to maintain that behavior unless json_schema_transformer is set explicitly.
         # This was not the case when using a DeepSeek model with another model class (e.g. BedrockConverseModel or GroqModel),
         # so we won't do this in `deepseek_model_profile` unless we learn it's always needed.
-        return OpenAIModelProfile(json_schema_transformer=OpenAIJsonSchemaTransformer).update(profile)
+        # Optimization: profile very often None, avoid unnecessary instantiation work
+        base_profile = OpenAIModelProfile(json_schema_transformer=OpenAIJsonSchemaTransformer)
+        if profile is not None:
+            return base_profile.update(profile)
+        return base_profile
 
-    @overload
-    def __init__(self) -> None: ...
+    def __init__(
+        self,
+        *,
+        api_key: str | None = None,
+        openai_client: AsyncOpenAI | None = None,
+        http_client: AsyncHTTPClient | None = None,
+    ) -> None:
+        api_key = api_key or os.getenv('DEEPSEEK_API_KEY')
+        if not api_key and openai_client is None:
+            raise UserError(
+                'Set the `DEEPSEEK_API_KEY` environment variable or pass it via `DeepSeekProvider(api_key=...)`'
+                'to use the DeepSeek provider.'
+            )
 
-    @overload
-    def __init__(self, *, api_key: str) -> None: ...
+        if openai_client is not None:
+            self._client = openai_client
+        elif http_client is not None:
+            self._client = AsyncOpenAI(base_url=self.base_url, api_key=api_key, http_client=http_client)
+        else:
+            http_client = cached_async_http_client(provider='deepseek')
+            self._client = AsyncOpenAI(base_url=self.base_url, api_key=api_key, http_client=http_client)
 
-    @overload
-    def __init__(self, *, api_key: str, http_client: AsyncHTTPClient) -> None: ...
+    def __init__(
+        self,
+        *,
+        api_key: str | None = None,
+        openai_client: AsyncOpenAI | None = None,
+        http_client: AsyncHTTPClient | None = None,
+    ) -> None:
+        api_key = api_key or os.getenv('DEEPSEEK_API_KEY')
+        if not api_key and openai_client is None:
+            raise UserError(
+                'Set the `DEEPSEEK_API_KEY` environment variable or pass it via `DeepSeekProvider(api_key=...)`'
+                'to use the DeepSeek provider.'
+            )
 
-    @overload
-    def __init__(self, *, openai_client: AsyncOpenAI | None = None) -> None: ...
+        if openai_client is not None:
+            self._client = openai_client
+        elif http_client is not None:
+            self._client = AsyncOpenAI(base_url=self.base_url, api_key=api_key, http_client=http_client)
+        else:
+            http_client = cached_async_http_client(provider='deepseek')
+            self._client = AsyncOpenAI(base_url=self.base_url, api_key=api_key, http_client=http_client)
+
+    def __init__(
+        self,
+        *,
+        api_key: str | None = None,
+        openai_client: AsyncOpenAI | None = None,
+        http_client: AsyncHTTPClient | None = None,
+    ) -> None:
+        api_key = api_key or os.getenv('DEEPSEEK_API_KEY')
+        if not api_key and openai_client is None:
+            raise UserError(
+                'Set the `DEEPSEEK_API_KEY` environment variable or pass it via `DeepSeekProvider(api_key=...)`'
+                'to use the DeepSeek provider.'
+            )
+
+        if openai_client is not None:
+            self._client = openai_client
+        elif http_client is not None:
+            self._client = AsyncOpenAI(base_url=self.base_url, api_key=api_key, http_client=http_client)
+        else:
+            http_client = cached_async_http_client(provider='deepseek')
+            self._client = AsyncOpenAI(base_url=self.base_url, api_key=api_key, http_client=http_client)
+
+    def __init__(
+        self,
+        *,
+        api_key: str | None = None,
+        openai_client: AsyncOpenAI | None = None,
+        http_client: AsyncHTTPClient | None = None,
+    ) -> None:
+        api_key = api_key or os.getenv('DEEPSEEK_API_KEY')
+        if not api_key and openai_client is None:
+            raise UserError(
+                'Set the `DEEPSEEK_API_KEY` environment variable or pass it via `DeepSeekProvider(api_key=...)`'
+                'to use the DeepSeek provider.'
+            )
+
+        if openai_client is not None:
+            self._client = openai_client
+        elif http_client is not None:
+            self._client = AsyncOpenAI(base_url=self.base_url, api_key=api_key, http_client=http_client)
+        else:
+            http_client = cached_async_http_client(provider='deepseek')
+            self._client = AsyncOpenAI(base_url=self.base_url, api_key=api_key, http_client=http_client)
 
     def __init__(
         self,
