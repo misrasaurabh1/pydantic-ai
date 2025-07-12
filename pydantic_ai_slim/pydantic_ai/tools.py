@@ -181,18 +181,18 @@ class Tool(Generic[AgentDepsT]):
 
     def __init__(
         self,
-        function: ToolFuncEither[AgentDepsT],
+        function,
         *,
-        takes_ctx: bool | None = None,
-        max_retries: int | None = None,
-        name: str | None = None,
-        description: str | None = None,
-        prepare: ToolPrepareFunc[AgentDepsT] | None = None,
-        docstring_format: DocstringFormat = 'auto',
-        require_parameter_descriptions: bool = False,
-        schema_generator: type[GenerateJsonSchema] = GenerateToolJsonSchema,
-        strict: bool | None = None,
-        function_schema: _function_schema.FunctionSchema | None = None,
+        takes_ctx=None,
+        max_retries=None,
+        name=None,
+        description=None,
+        prepare=None,
+        docstring_format='auto',
+        require_parameter_descriptions=False,
+        schema_generator=GenerateJsonSchema,
+        strict=None,
+        function_schema=None,
     ):
         """Create a new tool instance.
 
@@ -247,7 +247,14 @@ class Tool(Generic[AgentDepsT]):
                 See [`ToolDefinition`][pydantic_ai.tools.ToolDefinition] for more info.
             function_schema: The function schema to use for the tool. If not provided, it will be generated.
         """
+        # Cheap assignments first
         self.function = function
+        self.max_retries = max_retries
+        self.prepare = prepare
+        self.docstring_format = docstring_format
+        self.require_parameter_descriptions = require_parameter_descriptions
+        self.strict = strict
+        # Costly computation last, schema is not needed for downstream assignments
         self.function_schema = function_schema or _function_schema.function_schema(
             function,
             schema_generator,
@@ -256,13 +263,8 @@ class Tool(Generic[AgentDepsT]):
             require_parameter_descriptions=require_parameter_descriptions,
         )
         self.takes_ctx = self.function_schema.takes_ctx
-        self.max_retries = max_retries
         self.name = name or function.__name__
         self.description = description or self.function_schema.description
-        self.prepare = prepare
-        self.docstring_format = docstring_format
-        self.require_parameter_descriptions = require_parameter_descriptions
-        self.strict = strict
 
     @classmethod
     def from_schema(
@@ -286,15 +288,15 @@ class Tool(Generic[AgentDepsT]):
         Returns:
             A Pydantic tool that calls the function
         """
+        is_async = _utils.is_async_callable(function)
         function_schema = _function_schema.FunctionSchema(
             function=function,
             description=description,
             validator=SchemaValidator(schema=core_schema.any_schema()),
             json_schema=json_schema,
             takes_ctx=False,
-            is_async=_utils.is_async_callable(function),
+            is_async=is_async,
         )
-
         return cls(
             function,
             takes_ctx=False,
