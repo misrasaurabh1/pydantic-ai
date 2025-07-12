@@ -6,6 +6,7 @@ import inspect
 import re
 import time
 import uuid
+from collections import deque
 from collections.abc import AsyncIterable, AsyncIterator, Awaitable, Iterator
 from contextlib import asynccontextmanager, suppress
 from dataclasses import dataclass, fields, is_dataclass
@@ -57,11 +58,10 @@ def is_model_like(type_: Any) -> bool:
     These should all generate a JSON Schema with `{"type": "object"}` and therefore be usable directly as
     function parameters.
     """
-    return (
-        isinstance(type_, type)
-        and not isinstance(type_, GenericAlias)
-        and (issubclass(type_, BaseModel) or is_dataclass(type_) or is_typeddict(type_))  # pyright: ignore[reportUnknownArgumentType]
-    )
+    # First do fast checks, then slow ones
+    if not (isinstance(type_, type) and not isinstance(type_, _GenericAlias)):
+        return False
+    return _is_model_class(type_)
 
 
 def check_object_json_schema(schema: JsonSchemaValue) -> ObjectJsonSchema:
@@ -230,7 +230,10 @@ def generate_tool_call_id() -> str:
 
     Ensure that the tool call id is unique.
     """
-    return f'pyd_ai_{uuid.uuid4().hex}'
+    if not _tool_call_id_cache:
+        # Refill the cache if empty
+        _tool_call_id_cache.extend(f'pyd_ai_{uuid.uuid4().hex}' for _ in range(_TOOL_CALL_ID_CACHE_SIZE))
+    return _tool_call_id_cache.popleft()
 
 
 class PeekableAsyncStream(Generic[T]):
@@ -453,3 +456,27 @@ def get_union_args(tp: Any) -> tuple[Any, ...]:
         return get_args(tp)
     else:
         return ()
+
+
+def _is_model_class(type_: Any) -> bool:
+    """Helper that runs only after isinstance(type_, type) and not GenericAlias."""
+    # issubclass is slow, so order checks with cheapest first
+    return issubclass(type_, _BaseModel) or _is_dataclass(type_) or _is_typeddict(type_)
+
+
+def _fill_tool_call_id_cache():
+    # Fill the cache with new pre-generated UUID hex strings
+    _tool_call_id_cache.extend(f'pyd_ai_{u.hex}' for u in uuid.uuid4() for _ in range(_TOOL_CALL_ID_CACHE_SIZE))
+
+
+_is_dataclass = is_dataclass
+
+_is_typeddict = is_typeddict
+
+_BaseModel = BaseModel
+
+_GenericAlias = GenericAlias
+
+_TOOL_CALL_ID_CACHE_SIZE = 256
+
+_tool_call_id_cache = deque()
