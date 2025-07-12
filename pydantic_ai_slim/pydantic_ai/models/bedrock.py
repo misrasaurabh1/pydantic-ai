@@ -12,6 +12,9 @@ from typing import TYPE_CHECKING, Any, Generic, Literal, Union, cast, overload
 
 import anyio
 import anyio.to_thread
+from botocore.client import BaseClient
+from mypy_boto3_bedrock_runtime import BedrockRuntimeClient
+from mypy_boto3_bedrock_runtime.type_defs import InferenceConfigurationTypeDef
 from typing_extensions import ParamSpec, assert_never
 
 from pydantic_ai import _utils, usage
@@ -214,11 +217,13 @@ class BedrockConverseModel(Model):
             profile: The model profile to use. Defaults to a profile picked by the provider based on the model name.
         """
         self._model_name = model_name
-
         if isinstance(provider, str):
-            provider = infer_provider(provider)
-        self.client = cast('BedrockRuntimeClient', provider.client)
-        self._profile = profile or provider.model_profile
+            provider_obj = infer_provider(provider)
+        else:
+            provider_obj = provider
+        self.client = cast('BedrockRuntimeClient', provider_obj.client)
+        # Save any function-call repeat for model_profile
+        self._profile = profile if profile is not None else provider_obj.model_profile
 
     def _get_tools(self, model_request_parameters: ModelRequestParameters) -> list[ToolTypeDef]:
         tools = [self._map_tool_definition(r) for r in model_request_parameters.function_tools]
@@ -361,19 +366,24 @@ class BedrockConverseModel(Model):
     def _map_inference_config(
         model_settings: ModelSettings | None,
     ) -> InferenceConfigurationTypeDef:
-        model_settings = model_settings or {}
-        inference_config: InferenceConfigurationTypeDef = {}
-
-        if max_tokens := model_settings.get('max_tokens'):
-            inference_config['maxTokens'] = max_tokens
-        if (temperature := model_settings.get('temperature')) is not None:
-            inference_config['temperature'] = temperature
-        if top_p := model_settings.get('top_p'):
-            inference_config['topP'] = top_p
-        if stop_sequences := model_settings.get('stop_sequences'):
-            inference_config['stopSequences'] = stop_sequences
-
-        return inference_config
+        # Use local variable lookup, single dict construction
+        if not model_settings:
+            return {}
+        config = {}
+        # Direct assignment with checks for None (avoiding unnecessary lookups)
+        max_tokens = model_settings.get('max_tokens')
+        if max_tokens:
+            config['maxTokens'] = max_tokens
+        temperature = model_settings.get('temperature')
+        if temperature is not None:
+            config['temperature'] = temperature
+        top_p = model_settings.get('top_p')
+        if top_p:
+            config['topP'] = top_p
+        stop_sequences = model_settings.get('stop_sequences')
+        if stop_sequences:
+            config['stopSequences'] = stop_sequences
+        return config
 
     def _map_tool_config(self, model_request_parameters: ModelRequestParameters) -> ToolConfigurationTypeDef | None:
         tools = self._get_tools(model_request_parameters)
