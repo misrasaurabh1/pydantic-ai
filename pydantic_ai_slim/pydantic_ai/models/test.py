@@ -122,9 +122,8 @@ class TestModel(Model):
         if self.call_tools == 'all':
             return [(r.name, r) for r in model_request_parameters.function_tools]
         else:
-            function_tools_lookup = {t.name: t for t in model_request_parameters.function_tools}
-            tools_to_call = (function_tools_lookup[name] for name in self.call_tools)
-            return [(r.name, r) for r in tools_to_call]
+            call_tools_set = set(self.call_tools)
+            return [(r.name, r) for r in model_request_parameters.function_tools if r.name in call_tools_set]
 
     def _get_output(self, model_request_parameters: ModelRequestParameters) -> _WrappedTextOutput | _WrappedToolOutput:
         if self.custom_output_text is not None:
