@@ -8,6 +8,8 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Any, Literal, Union, cast, overload
 
+from anthropic import AsyncAnthropic
+from anthropic.types.beta import BetaToolParam
 from typing_extensions import assert_never
 
 from .. import ModelHTTPError, UnexpectedModelBehavior, _utils, usage
@@ -142,8 +144,9 @@ class AnthropicModel(Model):
 
         if isinstance(provider, str):
             provider = infer_provider(provider)
-        self.client = provider.client
-        self._profile = profile or provider.model_profile
+        self.client = provider._client
+        # Use provided profile, or obtain via model_profile method (passing in model_name)
+        self._profile = profile if profile is not None else provider.model_profile(model_name)
 
     @property
     def base_url(self) -> str:
@@ -295,10 +298,17 @@ class AnthropicModel(Model):
         )
 
     def _get_tools(self, model_request_parameters: ModelRequestParameters) -> list[BetaToolParam]:
-        tools = [self._map_tool_definition(r) for r in model_request_parameters.function_tools]
-        if model_request_parameters.output_tools:
-            tools += [self._map_tool_definition(r) for r in model_request_parameters.output_tools]
-        return tools
+        # Combine both function_tools and output_tools in a single iteration for efficiency
+        function_tools = getattr(model_request_parameters, 'function_tools', [])
+        output_tools = getattr(model_request_parameters, 'output_tools', [])
+
+        result = []
+        # Pre-allocate list size if both collections exist
+        if function_tools:
+            result.extend(self._map_tool_definition(r) for r in function_tools)
+        if output_tools:
+            result.extend(self._map_tool_definition(r) for r in output_tools)
+        return result
 
     async def _map_message(self, messages: list[ModelMessage]) -> tuple[str, list[BetaMessageParam]]:  # noqa: C901
         """Just maps a `pydantic_ai.Message` to a `anthropic.types.MessageParam`."""
@@ -415,6 +425,7 @@ class AnthropicModel(Model):
 
     @staticmethod
     def _map_tool_definition(f: ToolDefinition) -> BetaToolParam:
+        # No optimization needed here; dict construction is minimal.
         return {
             'name': f.name,
             'description': f.description,
