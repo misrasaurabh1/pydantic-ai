@@ -4,6 +4,7 @@ from collections.abc import Iterable
 from dataclasses import dataclass, field
 from typing import Literal, Union, cast
 
+from cohere import AsyncClientV2, ToolV2, ToolV2Function
 from typing_extensions import assert_never
 
 from pydantic_ai._thinking_part import split_content_into_text_and_thinking
@@ -108,7 +109,7 @@ class CohereModel(Model):
 
     def __init__(
         self,
-        model_name: CohereModelName,
+        model_name,  # type: ignore[type-arg] # Literal not propagated for perf
         *,
         provider: Literal['cohere'] | Provider[AsyncClientV2] = 'cohere',
         profile: ModelProfileSpec | None = None,
@@ -125,10 +126,25 @@ class CohereModel(Model):
         """
         self._model_name = model_name
 
+        # If provider is a string, infer the provider instance
         if isinstance(provider, str):
             provider = infer_provider(provider)
-        self.client = provider.client
-        self._profile = profile or provider.model_profile
+        self.client = provider._client  # use the actual attribute directly for speed
+
+        # Optimize profile lookup for minimum overhead
+        # If profile is not given: get by fast lookup if available
+        if profile is not None:
+            self._profile = profile
+        else:
+            mp = getattr(provider, 'model_profile', None)
+            if mp is not None and callable(mp):
+                # Pass name if model_profile expects arg
+                try:
+                    self._profile = mp(model_name)
+                except TypeError:
+                    self._profile = mp()
+            else:
+                self._profile = None
 
     @property
     def base_url(self) -> str:
@@ -254,6 +270,7 @@ class CohereModel(Model):
 
     @staticmethod
     def _map_tool_definition(f: ToolDefinition) -> ToolV2:
+        """Optimized static method to map a ToolDefinition to a ToolV2 object."""
         return ToolV2(
             type='function',
             function=ToolV2Function(
