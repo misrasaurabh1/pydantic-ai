@@ -862,27 +862,38 @@ def _metadata_as_usage(response: _GeminiResponse) -> usage.Usage:
     metadata = response.get('usage_metadata')
     if metadata is None:
         return usage.Usage()  # pragma: no cover
+
     details: dict[str, int] = {}
-    if cached_content_token_count := metadata.get('cached_content_token_count'):
+    # Cache lookups to local vars for speed
+    get = metadata.get
+
+    cached_content_token_count = get('cached_content_token_count')
+    if cached_content_token_count:
         details['cached_content_tokens'] = cached_content_token_count  # pragma: no cover
 
-    if thoughts_token_count := metadata.get('thoughts_token_count'):
+    thoughts_token_count = get('thoughts_token_count')
+    if thoughts_token_count:
         details['thoughts_tokens'] = thoughts_token_count
 
-    if tool_use_prompt_token_count := metadata.get('tool_use_prompt_token_count'):
+    tool_use_prompt_token_count = get('tool_use_prompt_token_count')
+    if tool_use_prompt_token_count:
         details['tool_use_prompt_tokens'] = tool_use_prompt_token_count  # pragma: no cover
+
+    # Perf: avoid method lookup in loops
+    lower = str.lower
 
     for key, metadata_details in metadata.items():
         if key.endswith('_details') and metadata_details:
-            metadata_details = cast(list[_GeminiModalityTokenCount], metadata_details)
-            suffix = key.removesuffix('_details')
+            # Save removesuffix result as suffix is the same for all details of this key
+            suffix = key[:-8]  # Removes "_details"
             for detail in metadata_details:
-                details[f'{detail["modality"].lower()}_{suffix}'] = detail['token_count']
+                mod = lower(detail['modality'])
+                details[f'{mod}_{suffix}'] = detail['token_count']
 
     return usage.Usage(
-        request_tokens=metadata.get('prompt_token_count', 0),
-        response_tokens=metadata.get('candidates_token_count', 0),
-        total_tokens=metadata.get('total_token_count', 0),
+        request_tokens=get('prompt_token_count', 0),
+        response_tokens=get('candidates_token_count', 0),
+        total_tokens=get('total_token_count', 0),
         details=details,
     )
 
