@@ -2,6 +2,7 @@ from __future__ import annotations as _annotations
 
 import re
 from dataclasses import dataclass
+from functools import lru_cache
 from typing import Any
 
 from . import ModelProfile
@@ -24,10 +25,15 @@ class OpenAIModelProfile(ModelProfile):
 
 def openai_model_profile(model_name: str) -> ModelProfile:
     """Get the model profile for an OpenAI model."""
+    return _cached_openai_model_profile(model_name)
+
+
+# Caching openai_model_profile to avoid recalculation.
+@lru_cache(maxsize=64)
+def _cached_openai_model_profile(model_name: str) -> ModelProfile:
     is_reasoning_model = model_name.startswith('o')
-    # Structured Outputs (output mode 'native') is only supported with the gpt-4o-mini, gpt-4o-mini-2024-07-18, and gpt-4o-2024-08-06 model snapshots and later.
-    # We leave it in here for all models because the `default_structured_output_mode` is `'tool'`, so `native` is only used
-    # when the user specifically uses the `NativeOutput` marker, so an error from the API is acceptable.
+    # Structured Outputs (output mode 'native') is only supported with certain models.
+    # Left as per design for "NativeOutput" marker use-case.
     return OpenAIModelProfile(
         json_schema_transformer=OpenAIJsonSchemaTransformer,
         supports_json_schema_output=True,
