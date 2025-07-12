@@ -1,8 +1,8 @@
 from __future__ import annotations as _annotations
 
 import os
-from typing import overload
 
+from groq import AsyncGroq
 from httpx import AsyncClient as AsyncHTTPClient
 
 from pydantic_ai.exceptions import UserError
@@ -40,29 +40,26 @@ class GroqProvider(Provider[AsyncGroq]):
         return self._client
 
     def model_profile(self, model_name: str) -> ModelProfile | None:
-        prefix_to_profile = {
-            'llama': meta_model_profile,
-            'meta-llama/': meta_model_profile,
-            'gemma': google_model_profile,
-            'qwen': qwen_model_profile,
-            'deepseek': deepseek_model_profile,
-            'mistral': mistral_model_profile,
-        }
-
-        for prefix, profile_func in prefix_to_profile.items():
-            model_name = model_name.lower()
-            if model_name.startswith(prefix):
+        lower_model = model_name.lower()
+        # Check Meta prefixes first
+        for prefix in _META_PREFIXES:
+            if lower_model.startswith(prefix):
                 if prefix.endswith('/'):
                     model_name = model_name[len(prefix) :]
-                return profile_func(model_name)
-
+                return meta_model_profile(model_name)
+        for prefix in _GOOGLE_PREFIXES:
+            if lower_model.startswith(prefix):
+                return google_model_profile(model_name)
+        for prefix in _QWEN_PREFIXES:
+            if lower_model.startswith(prefix):
+                return qwen_model_profile(model_name)
+        for prefix in _DEEPSEEK_PREFIXES:
+            if lower_model.startswith(prefix):
+                return deepseek_model_profile(model_name)
+        for prefix in _MISTRAL_PREFIXES:
+            if lower_model.startswith(prefix):
+                return mistral_model_profile(model_name)
         return None
-
-    @overload
-    def __init__(self, *, groq_client: AsyncGroq | None = None) -> None: ...
-
-    @overload
-    def __init__(self, *, api_key: str | None = None, http_client: AsyncHTTPClient | None = None) -> None: ...
 
     def __init__(
         self,
@@ -85,16 +82,91 @@ class GroqProvider(Provider[AsyncGroq]):
             assert http_client is None, 'Cannot provide both `groq_client` and `http_client`'
             assert api_key is None, 'Cannot provide both `groq_client` and `api_key`'
             self._client = groq_client
-        else:
-            api_key = api_key or os.environ.get('GROQ_API_KEY')
+            return  # Early return for clarity/speed
 
-            if not api_key:
-                raise UserError(
-                    'Set the `GROQ_API_KEY` environment variable or pass it via `GroqProvider(api_key=...)`'
-                    'to use the Groq provider.'
-                )
-            elif http_client is not None:
-                self._client = AsyncGroq(base_url=self.base_url, api_key=api_key, http_client=http_client)
-            else:
-                http_client = cached_async_http_client(provider='groq')
-                self._client = AsyncGroq(base_url=self.base_url, api_key=api_key, http_client=http_client)
+        api_key = api_key or os.environ.get('GROQ_API_KEY')
+        if not api_key:
+            raise UserError(
+                'Set the `GROQ_API_KEY` environment variable or pass it via `GroqProvider(api_key=...)`'
+                'to use the Groq provider.'
+            )
+        if http_client is None:
+            http_client = cached_async_http_client(provider='groq')
+        self._client = AsyncGroq(base_url=self.base_url, api_key=api_key, http_client=http_client)
+
+    def __init__(
+        self,
+        *,
+        api_key: str | None = None,
+        groq_client: AsyncGroq | None = None,
+        http_client: AsyncHTTPClient | None = None,
+    ) -> None:
+        """Create a new Groq provider.
+
+        Args:
+            api_key: The API key to use for authentication, if not provided, the `GROQ_API_KEY` environment variable
+                will be used if available.
+            groq_client: An existing
+                [`AsyncGroq`](https://github.com/groq/groq-python?tab=readme-ov-file#async-usage)
+                client to use. If provided, `api_key` and `http_client` must be `None`.
+            http_client: An existing `AsyncHTTPClient` to use for making HTTP requests.
+        """
+        if groq_client is not None:
+            assert http_client is None, 'Cannot provide both `groq_client` and `http_client`'
+            assert api_key is None, 'Cannot provide both `groq_client` and `api_key`'
+            self._client = groq_client
+            return  # Early return for clarity/speed
+
+        api_key = api_key or os.environ.get('GROQ_API_KEY')
+        if not api_key:
+            raise UserError(
+                'Set the `GROQ_API_KEY` environment variable or pass it via `GroqProvider(api_key=...)`'
+                'to use the Groq provider.'
+            )
+        if http_client is None:
+            http_client = cached_async_http_client(provider='groq')
+        self._client = AsyncGroq(base_url=self.base_url, api_key=api_key, http_client=http_client)
+
+    def __init__(
+        self,
+        *,
+        api_key: str | None = None,
+        groq_client: AsyncGroq | None = None,
+        http_client: AsyncHTTPClient | None = None,
+    ) -> None:
+        """Create a new Groq provider.
+
+        Args:
+            api_key: The API key to use for authentication, if not provided, the `GROQ_API_KEY` environment variable
+                will be used if available.
+            groq_client: An existing
+                [`AsyncGroq`](https://github.com/groq/groq-python?tab=readme-ov-file#async-usage)
+                client to use. If provided, `api_key` and `http_client` must be `None`.
+            http_client: An existing `AsyncHTTPClient` to use for making HTTP requests.
+        """
+        if groq_client is not None:
+            assert http_client is None, 'Cannot provide both `groq_client` and `http_client`'
+            assert api_key is None, 'Cannot provide both `groq_client` and `api_key`'
+            self._client = groq_client
+            return  # Early return for clarity/speed
+
+        api_key = api_key or os.environ.get('GROQ_API_KEY')
+        if not api_key:
+            raise UserError(
+                'Set the `GROQ_API_KEY` environment variable or pass it via `GroqProvider(api_key=...)`'
+                'to use the Groq provider.'
+            )
+        if http_client is None:
+            http_client = cached_async_http_client(provider='groq')
+        self._client = AsyncGroq(base_url=self.base_url, api_key=api_key, http_client=http_client)
+
+
+_META_PREFIXES = ('llama', 'meta-llama/')
+
+_GOOGLE_PREFIXES = ('gemma',)
+
+_QWEN_PREFIXES = ('qwen',)
+
+_DEEPSEEK_PREFIXES = ('deepseek',)
+
+_MISTRAL_PREFIXES = ('mistral',)
