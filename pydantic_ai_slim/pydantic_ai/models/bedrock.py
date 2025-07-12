@@ -10,8 +10,30 @@ from datetime import datetime
 from itertools import count
 from typing import TYPE_CHECKING, Any, Generic, Literal, Union, cast, overload
 
-import anyio
 import anyio.to_thread
+from botocore.client import BaseClient
+from botocore.eventstream import EventStream
+from mypy_boto3_bedrock_runtime import BedrockRuntimeClient
+from mypy_boto3_bedrock_runtime.type_defs import (
+    ContentBlockOutputTypeDef,
+    ContentBlockUnionTypeDef,
+    ConverseRequestTypeDef,
+    ConverseResponseTypeDef,
+    ConverseStreamMetadataEventTypeDef,
+    ConverseStreamOutputTypeDef,
+    DocumentBlockTypeDef,
+    GuardrailConfigurationTypeDef,
+    ImageBlockTypeDef,
+    InferenceConfigurationTypeDef,
+    MessageUnionTypeDef,
+    PerformanceConfigurationTypeDef,
+    PromptVariableValuesTypeDef,
+    SystemContentBlockTypeDef,
+    ToolChoiceTypeDef,
+    ToolConfigurationTypeDef,
+    ToolTypeDef,
+    VideoBlockTypeDef,
+)
 from typing_extensions import ParamSpec, assert_never
 
 from pydantic_ai import _utils, usage
@@ -65,6 +87,13 @@ if TYPE_CHECKING:
         ToolTypeDef,
         VideoBlockTypeDef,
     )
+
+    """Latest Bedrock models."""
+    """Possible Bedrock model names.
+
+Since Bedrock supports a variety of date-stamped models, we explicitly list the latest models but allow any name in the type hints.
+See [the Bedrock docs](https://docs.aws.amazon.com/bedrock/latest/userguide/models-supported.html) for a full list.
+"""
 
 
 LatestBedrockModelNames = Literal[
@@ -221,10 +250,15 @@ class BedrockConverseModel(Model):
         self._profile = profile or provider.model_profile
 
     def _get_tools(self, model_request_parameters: ModelRequestParameters) -> list[ToolTypeDef]:
-        tools = [self._map_tool_definition(r) for r in model_request_parameters.function_tools]
+        # Single pass over both lists to avoid extra list allocations, use local variable for method lookup
+        map_tool = self._map_tool_definition
+        tools_out = []
+        for tool in model_request_parameters.function_tools:
+            tools_out.append(map_tool(tool))
         if model_request_parameters.output_tools:
-            tools += [self._map_tool_definition(r) for r in model_request_parameters.output_tools]
-        return tools
+            for tool in model_request_parameters.output_tools:
+                tools_out.append(map_tool(tool))
+        return tools_out
 
     @staticmethod
     def _map_tool_definition(f: ToolDefinition) -> ToolTypeDef:
