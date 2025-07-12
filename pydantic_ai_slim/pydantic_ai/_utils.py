@@ -57,11 +57,10 @@ def is_model_like(type_: Any) -> bool:
     These should all generate a JSON Schema with `{"type": "object"}` and therefore be usable directly as
     function parameters.
     """
-    return (
-        isinstance(type_, type)
-        and not isinstance(type_, GenericAlias)
-        and (issubclass(type_, BaseModel) or is_dataclass(type_) or is_typeddict(type_))  # pyright: ignore[reportUnknownArgumentType]
-    )
+    # First do fast checks, then slow ones
+    if not (isinstance(type_, type) and not isinstance(type_, _GenericAlias)):
+        return False
+    return _is_model_class(type_)
 
 
 def check_object_json_schema(schema: JsonSchemaValue) -> ObjectJsonSchema:
@@ -316,7 +315,7 @@ def dataclasses_no_defaults_repr(self: Any) -> str:
 
 
 def number_to_datetime(x: int | float) -> datetime:
-    return TypeAdapter(datetime).validate_python(x)
+    return _datetime_ta.validate_python(x)
 
 
 AwaitableCallable = Callable[..., Awaitable[T]]
@@ -453,3 +452,20 @@ def get_union_args(tp: Any) -> tuple[Any, ...]:
         return get_args(tp)
     else:
         return ()
+
+
+def _is_model_class(type_: Any) -> bool:
+    """Helper that runs only after isinstance(type_, type) and not GenericAlias."""
+    # issubclass is slow, so order checks with cheapest first
+    return issubclass(type_, _BaseModel) or _is_dataclass(type_) or _is_typeddict(type_)
+
+
+_is_dataclass = is_dataclass
+
+_is_typeddict = is_typeddict
+
+_BaseModel = BaseModel
+
+_GenericAlias = GenericAlias
+
+_datetime_ta = TypeAdapter(datetime)
