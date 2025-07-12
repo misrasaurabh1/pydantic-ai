@@ -309,17 +309,21 @@ def _estimate_string_tokens(content: str | Sequence[UserContent]) -> int:
     if not content:
         return 0
     if isinstance(content, str):
-        return len(re.split(r'[\s",.:]+', content.strip()))
-    else:
-        tokens = 0
-        for part in content:
-            if isinstance(part, str):
-                tokens += len(re.split(r'[\s",.:]+', part.strip()))
-            # TODO(Marcelo): We need to study how we can estimate the tokens for these types of content.
-            if isinstance(part, (AudioUrl, ImageUrl)):
-                tokens += 0
-            elif isinstance(part, BinaryContent):
-                tokens += len(part.data)
-            else:
-                tokens += 0
-        return tokens
+        return len(_TOKEN_RE.split(content.strip()))
+
+    # content is a sequence of UserContent
+    def token_count(part):
+        if isinstance(part, str):
+            return len(_TOKEN_RE.split(part.strip()))
+        # TODO(Marcelo): We need to study how we can estimate the tokens for these types of content.
+        if isinstance(part, (AudioUrl, ImageUrl)):
+            return 0
+        elif isinstance(part, BinaryContent):
+            return len(part.data)
+        else:
+            return 0
+
+    return sum(token_count(part) for part in content)
+
+
+_TOKEN_RE = re.compile(r'[\s",.:]+')
