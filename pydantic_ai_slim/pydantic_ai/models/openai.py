@@ -8,6 +8,8 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Any, Literal, Union, cast, overload
 
+from openai import NOT_GIVEN, AsyncOpenAI, NotGiven
+from openai.types.shared_params import Reasoning
 from typing_extensions import assert_never
 
 from pydantic_ai._thinking_part import split_content_into_text_and_thinking
@@ -609,8 +611,13 @@ class OpenAIResponsesModel(Model):
 
         if isinstance(provider, str):
             provider = infer_provider(provider)
-        self.client = provider.client
-        self._profile = profile or provider.model_profile
+        self.client = provider._client  # Use fast path direct attribute access
+
+        if profile is not None:
+            self._profile = profile
+        else:
+            model_profile_func = getattr(provider, 'model_profile', None)
+            self._profile = model_profile_func(model_name) if callable(model_profile_func) else None
 
     @property
     def model_name(self) -> OpenAIModelName:
@@ -777,13 +784,21 @@ class OpenAIResponsesModel(Model):
             raise  # pragma: lax no cover
 
     def _get_reasoning(self, model_settings: OpenAIResponsesModelSettings) -> Reasoning | NotGiven:
-        reasoning_effort = model_settings.get('openai_reasoning_effort', None)
-        reasoning_summary = model_settings.get('openai_reasoning_summary', None)
-        reasoning_generate_summary = model_settings.get('openai_reasoning_generate_summary', None)
+        # Use a single dict lookup and unpack locally for speed.
+        reasoning_effort = reasoning_summary = reasoning_generate_summary = None
+        if model_settings:
+            reasoning_effort = model_settings.get('openai_reasoning_effort')
+            reasoning_summary = model_settings.get('openai_reasoning_summary')
+            reasoning_generate_summary = model_settings.get('openai_reasoning_generate_summary')
+        # Fast path: both are unset, return early
+        if not reasoning_effort and not (reasoning_summary or reasoning_generate_summary):
+            return NOT_GIVEN
 
+        # Validation: both user summary keys cannot be set
         if reasoning_summary and reasoning_generate_summary:  # pragma: no cover
             raise ValueError('`openai_reasoning_summary` and `openai_reasoning_generate_summary` cannot both be set.')
 
+        # Deprecation warning and migrate value if deprecated key set
         if reasoning_generate_summary is not None:  # pragma: no cover
             warnings.warn(
                 '`openai_reasoning_generate_summary` is deprecated, use `openai_reasoning_summary` instead',
@@ -791,6 +806,7 @@ class OpenAIResponsesModel(Model):
             )
             reasoning_summary = reasoning_generate_summary
 
+        # Still check if both are unset even after the migration
         if reasoning_effort is None and reasoning_summary is None:
             return NOT_GIVEN
         return Reasoning(effort=reasoning_effort, summary=reasoning_summary)
