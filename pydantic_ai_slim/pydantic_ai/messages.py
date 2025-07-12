@@ -566,7 +566,7 @@ class TextPart:
 
     def has_content(self) -> bool:
         """Return `True` if the text content is non-empty."""
-        return bool(self.content)
+        return self.content != ''
 
     __repr__ = _utils.dataclasses_no_defaults_repr
 
