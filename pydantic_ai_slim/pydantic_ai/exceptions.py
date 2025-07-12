@@ -72,20 +72,19 @@ class UnexpectedModelBehavior(AgentRunError):
 
     def __init__(self, message: str, body: str | None = None):
         self.message = message
-        if body is None:
-            self.body: str | None = None
-        else:
+        self.body: str | None = None
+        if body is not None:
             try:
-                self.body = json.dumps(json.loads(body), indent=2)
+                parsed = json.loads(body)
+                self.body = json.dumps(parsed, indent=2)
             except ValueError:
                 self.body = body
         super().__init__(message)
 
     def __str__(self) -> str:
-        if self.body:
+        if self.body is not None:
             return f'{self.message}, body:\n{self.body}'
-        else:
-            return self.message
+        return self.message
 
 
 class ModelHTTPError(AgentRunError):
