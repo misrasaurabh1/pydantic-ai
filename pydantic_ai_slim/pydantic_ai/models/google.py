@@ -8,6 +8,7 @@ from datetime import datetime
 from typing import Any, Literal, Union, cast, overload
 from uuid import uuid4
 
+from google.genai.types import FunctionDeclarationDict
 from typing_extensions import assert_never
 
 from .. import UnexpectedModelBehavior, _utils, usage
@@ -518,13 +519,12 @@ def _process_response_from_parts(
 
 
 def _function_declaration_from_tool(tool: ToolDefinition) -> FunctionDeclarationDict:
-    json_schema = tool.parameters_json_schema
-    f = FunctionDeclarationDict(
+    # Directly construct and return the FunctionDeclarationDict, avoid unnecessary local variable
+    return FunctionDeclarationDict(
         name=tool.name,
         description=tool.description,
-        parameters=json_schema,  # type: ignore
+        parameters=tool.parameters_json_schema,  # type: ignore
     )
-    return f
 
 
 def _tool_config(function_names: list[str]) -> ToolConfigDict:
