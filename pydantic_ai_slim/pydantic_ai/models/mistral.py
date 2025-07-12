@@ -625,30 +625,55 @@ class MistralStreamedResponse(StreamedResponse):
     @staticmethod
     def _validate_required_json_schema(json_dict: dict[str, Any], json_schema: dict[str, Any]) -> bool:
         """Validate that all required parameters in the JSON schema are present in the JSON dictionary."""
-        required_params = json_schema.get('required', [])
+        # Localize lookups for speed
+        required_params = json_schema.get('required', ())
         properties = json_schema.get('properties', {})
+        VALID_TYPE = VALID_JSON_TYPE_MAPPING  # fast local lookup
+
+        dict_get = dict.get  # bind for faster lookup
 
         for param in required_params:
+            # Early exit if missing
             if param not in json_dict:
                 return False
 
-            param_schema = properties.get(param, {})
+            param_schema = properties.get(param)
+            if not param_schema:
+                # If schema definition missing, skip check for this param
+                continue
+
             param_type = param_schema.get('type')
-            param_items_type = param_schema.get('items', {}).get('type')
+            param_value = json_dict[param]
 
-            if param_type == 'array' and param_items_type:
-                if not isinstance(json_dict[param], list):
+            # Fast conditional logic
+            if param_type == 'array':
+                items_schema = param_schema.get('items')
+                if not isinstance(param_value, list):
                     return False
-                for item in json_dict[param]:
-                    if not isinstance(item, VALID_JSON_TYPE_MAPPING[param_items_type]):
+
+                # Only validate item types if specified
+                if items_schema:
+                    item_type = items_schema.get('type')
+                    type_checker = VALID_TYPE.get(item_type)
+                    if type_checker:
+                        # use tuple for isinstance
+                        checker_tuple = type_checker if isinstance(type_checker, tuple) else (type_checker,)
+                        for item in param_value:
+                            if not isinstance(item, checker_tuple):
+                                return False
+            elif param_type:
+                type_checker = VALID_TYPE.get(param_type)
+                if type_checker and not isinstance(param_value, type_checker):
+                    return False
+
+            # Check nested objects recursively if nested schema exists
+            if isinstance(param_value, dict):
+                prop = param_schema.get('properties')
+                if prop is not None:
+                    # Recurse only if nested properties exist
+                    nested_schema = param_schema
+                    if not MistralStreamedResponse._validate_required_json_schema(param_value, nested_schema):
                         return False
-            elif param_type and not isinstance(json_dict[param], VALID_JSON_TYPE_MAPPING[param_type]):
-                return False
-
-            if isinstance(json_dict[param], dict) and 'properties' in param_schema:
-                nested_schema = param_schema
-                if not MistralStreamedResponse._validate_required_json_schema(json_dict[param], nested_schema):
-                    return False
 
         return True
 
