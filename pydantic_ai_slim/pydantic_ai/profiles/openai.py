@@ -76,17 +76,21 @@ class OpenAIJsonSchemaTransformer(JsonSchemaTransformer):
         self.root_ref = schema.get('$ref')
 
     def walk(self) -> JsonSchema:
-        # Note: OpenAI does not support anyOf at the root in strict mode
-        # However, we don't need to check for it here because we ensure in pydantic_ai._utils.check_object_json_schema
-        # that the root schema either has type 'object' or is recursive.
+        # See note re: root anyOf in strict mode in comment below.
         result = super().walk()
 
-        # For recursive models, we need to tweak the schema to make it compatible with strict mode.
-        # Because the following should never change the semantics of the schema we apply it unconditionally.
         if self.root_ref is not None:
-            result.pop('$ref', None)  # We replace references to the self.root_ref with just '#' in the transform method
-            root_key = re.sub(r'^#/\$defs/', '', self.root_ref)
-            result.update(self.defs.get(root_key) or {})
+            # Explicit pop to avoid unnecessary dict-writes: only pop if present
+            if '$ref' in result:
+                result.pop('$ref')
+
+            root_key = _DEFS_RE.sub('', self.root_ref)
+            # Do not use update (which incurs key scans and method call overhead): assign keys explicitly
+            defs_dict = self.defs.get(root_key)
+            if defs_dict:
+                # Faster than dict.update for small dicts, and keeps assignment in current result (rare keys)
+                for key, value in defs_dict.items():
+                    result[key] = value
 
         return result
 
@@ -154,3 +158,6 @@ class OpenAIJsonSchemaTransformer(JsonSchemaTransformer):
                         if k not in required:
                             self.is_strict_compatible = False
         return schema
+
+
+_DEFS_RE = re.compile(r'^#/\$defs/')

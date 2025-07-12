@@ -176,6 +176,16 @@ class JsonSchemaTransformer(ABC):
 
         return cases
 
+    def _shallow_schema_copy(self, src: JsonSchema) -> JsonSchema:
+        """Fast shallow copy that omits $defs reference (treating $defs as read-only),
+        as $defs is not part of the schema proper and is not mutated in main.
+        """
+        if '$defs' in src:
+            cp = {k: v for k, v in src.items() if k != '$defs'}
+        else:
+            cp = dict(src)
+        return cp
+
 
 class InlineDefsJsonSchemaTransformer(JsonSchemaTransformer):
     """Transforms the JSON Schema to inline $defs."""
@@ -185,3 +195,6 @@ class InlineDefsJsonSchemaTransformer(JsonSchemaTransformer):
 
     def transform(self, schema: JsonSchema) -> JsonSchema:
         return schema
+
+
+_DEFS_RE = re.compile(r'^#/\$defs/')
