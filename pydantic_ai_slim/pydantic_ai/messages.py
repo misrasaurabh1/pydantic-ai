@@ -914,25 +914,49 @@ class ToolCallPartDelta:
 
     def _apply_to_part(self, part: ToolCallPart) -> ToolCallPart:
         """Internal helper to apply this delta directly to a `ToolCallPart`."""
+        # Early return if no deltas are set
+        if self.tool_name_delta is None and self.args_delta is None and self.tool_call_id is None:
+            return part
+
+        tool_name = part.tool_name
+        args = part.args
+        tool_call_id = part.tool_call_id
+
+        # Apply tool_name increment if needed
         if self.tool_name_delta:
-            # Append incremental text to the existing tool_name
-            tool_name = part.tool_name + self.tool_name_delta
-            part = replace(part, tool_name=tool_name)
+            tool_name = (tool_name or '') + self.tool_name_delta
 
-        if isinstance(self.args_delta, str):
-            if isinstance(part.args, dict):
+        # Apply args_delta
+        args_delta = self.args_delta
+        if isinstance(args_delta, str):
+            if isinstance(args, dict):
                 raise UnexpectedModelBehavior(f'Cannot apply JSON deltas to non-JSON tool arguments ({part=}, {self=})')
-            updated_json = (part.args or '') + self.args_delta
-            part = replace(part, args=updated_json)
-        elif isinstance(self.args_delta, dict):
-            if isinstance(part.args, str):
+            args = (args or '') + args_delta
+        elif isinstance(args_delta, dict):
+            if isinstance(args, str):
                 raise UnexpectedModelBehavior(f'Cannot apply dict deltas to non-dict tool arguments ({part=}, {self=})')
-            updated_dict = {**(part.args or {}), **self.args_delta}
-            part = replace(part, args=updated_dict)
+            base = args or {}
+            if args_delta:
+                # only merge if there are new keys (dict update)
+                args = base.copy()
+                args.update(args_delta)
+            else:
+                # do not unnecessarily replace with a new dict
+                args = base
 
+        # Apply tool_call_id update if needed
         if self.tool_call_id:
-            part = replace(part, tool_call_id=self.tool_call_id)
-        return part
+            tool_call_id = self.tool_call_id
+
+        # If no changes, return part directly
+        if tool_name is part.tool_name and args is part.args and tool_call_id is part.tool_call_id:
+            return part
+
+        return part.__class__(
+            tool_name=tool_name,
+            args=args,
+            tool_call_id=tool_call_id,
+        )
 
     __repr__ = _utils.dataclasses_no_defaults_repr
 
