@@ -9,6 +9,12 @@ from typing import Any, Literal, Union, cast
 
 import pydantic_core
 from httpx import Timeout
+from mistralai import (
+    Content as MistralContent,
+    OptionalNullable as MistralOptionalNullable,
+    TextChunk as MistralTextChunk,
+)
+from mistralai.types.basemodel import Unset as MistralUnset
 from typing_extensions import assert_never
 
 from pydantic_ai._thinking_part import split_content_into_text_and_thinking
@@ -688,23 +694,28 @@ def _map_usage(response: MistralChatCompletionResponse | MistralCompletionChunk)
 
 def _map_content(content: MistralOptionalNullable[MistralContent]) -> str | None:
     """Maps the delta content from a Mistral Completion Chunk to a string or None."""
-    output: str | None = None
-
-    if isinstance(content, MistralUnset) or not content:
+    # Fast path for strings
+    if isinstance(content, str):
+        output = content
+    # Fast path for unset or falsy
+    elif isinstance(content, MistralUnset) or not content:
         output = None
+    # List case: join all MistralTextChunk.text, error on any other type
     elif isinstance(content, list):
+        # Pre-collect text efficiently
+        out_chunks = []
         for chunk in content:
             if isinstance(chunk, MistralTextChunk):
-                output = output or '' + chunk.text
+                out_chunks.append(chunk.text)
             else:
-                assert False, (  # pragma: no cover
-                    f'Other data types like (Image, Reference) are not yet supported,  got {type(chunk)}'
-                )
-    elif isinstance(content, str):
-        output = content
+                # pragma: no cover
+                assert False, f'Other data types like (Image, Reference) are not yet supported,  got {type(chunk)}'
+        output = ''.join(out_chunks) if out_chunks else None
+    else:
+        output = None
 
-    # Note: Check len to handle potential mismatch between function calls and responses from the API. (`msg: not the same number of function class and responses`)
-    if output and len(output) == 0:  # pragma: no cover
+    # Note: Check len to handle potential mismatch between function calls and responses from the API.
+    if output is not None and len(output) == 0:  # pragma: no cover
         output = None
 
     return output
