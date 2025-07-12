@@ -7,14 +7,23 @@ from pydantic_ai.exceptions import UserError
 from . import ModelProfile
 from ._json_schema import JsonSchema, JsonSchemaTransformer
 
+# --- Optimization below ---
+# Cache the singleton ModelProfile for all calls with the same parameters.
+# This avoids constructing a new identical ModelProfile on every call.
+
+_GOOGLE_MODEL_PROFILE: ModelProfile | None = None
+
 
 def google_model_profile(model_name: str) -> ModelProfile | None:
     """Get the model profile for a Google model."""
-    return ModelProfile(
-        json_schema_transformer=GoogleJsonSchemaTransformer,
-        supports_json_schema_output=True,
-        supports_json_object_output=True,
-    )
+    global _GOOGLE_MODEL_PROFILE
+    if _GOOGLE_MODEL_PROFILE is None:
+        _GOOGLE_MODEL_PROFILE = ModelProfile(
+            json_schema_transformer=GoogleJsonSchemaTransformer,
+            supports_json_schema_output=True,
+            supports_json_object_output=True,
+        )
+    return _GOOGLE_MODEL_PROFILE
 
 
 class GoogleJsonSchemaTransformer(JsonSchemaTransformer):

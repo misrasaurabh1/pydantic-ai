@@ -10,6 +10,12 @@ from pydantic_ai.profiles import ModelProfile
 from pydantic_ai.profiles.google import google_model_profile
 from pydantic_ai.providers import Provider
 
+# --- Optimization below ---
+# Cache the singleton ModelProfile for all calls with the same parameters.
+# This avoids constructing a new identical ModelProfile on every call.
+
+_GOOGLE_MODEL_PROFILE: ModelProfile | None = None
+
 
 class GoogleGLAProvider(Provider[httpx.AsyncClient]):
     """Provider for Google Generative Language AI API."""
