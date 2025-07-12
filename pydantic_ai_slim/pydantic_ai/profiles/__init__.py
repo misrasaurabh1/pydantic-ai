@@ -46,13 +46,17 @@ class ModelProfile:
         """Update this ModelProfile (subclass) instance with the non-default values from another ModelProfile instance."""
         if not profile:
             return self
-        field_names = set(f.name for f in fields(self))
-        non_default_attrs = {
-            f.name: getattr(profile, f.name)
-            for f in fields(profile)
-            if f.name in field_names and getattr(profile, f.name) != f.default
-        }
-        return replace(self, **non_default_attrs)
+        # Use __dataclass_fields__ for fast name lookup
+        fields_self = self.__dataclass_fields__
+        changed = {}
+        for fname, fdef in profile.__dataclass_fields__.items():
+            if fname in fields_self:
+                v = getattr(profile, fname)
+                if v != fdef.default:
+                    changed[fname] = v
+        for k, v in changed.items():
+            object.__setattr__(self, k, v)
+        return self
 
 
 ModelProfileSpec = Union[ModelProfile, Callable[[str], Union[ModelProfile, None]]]
