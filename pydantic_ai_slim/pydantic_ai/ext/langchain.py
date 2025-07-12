@@ -2,7 +2,7 @@ from typing import Any, Protocol
 
 from pydantic.json_schema import JsonSchemaValue
 
-from pydantic_ai.tools import Tool
+from pydantic_ai.tools import Tool, Tool as BaseTool
 
 
 class LangChainTool(Protocol):
@@ -35,27 +35,38 @@ def tool_from_langchain(langchain_tool: LangChainTool) -> Tool:
     Returns:
         A Pydantic tool that corresponds to the LangChain tool.
     """
-    function_name = langchain_tool.name
-    function_description = langchain_tool.description
-    inputs = langchain_tool.args.copy()
-    required = sorted({name for name, detail in inputs.items() if 'default' not in detail})
-    schema: JsonSchemaValue = langchain_tool.get_input_jsonschema()
+    # Local variable cache and minimize attribute lookups
+    args = langchain_tool.args
+    name = langchain_tool.name
+    desc = langchain_tool.description
+
+    # Single pass: required list and defaults
+    required, defaults = [], {}
+    for n, d in args.items():
+        if 'default' not in d:
+            required.append(n)
+        else:
+            defaults[n] = d['default']
+    required.sort()
+
+    schema = langchain_tool.get_input_jsonschema()
+    # Set keys only if needed (minimize mutation)
     if 'additionalProperties' not in schema:
         schema['additionalProperties'] = False
     if required:
         schema['required'] = required
 
-    defaults = {name: detail['default'] for name, detail in inputs.items() if 'default' in detail}
-
-    # restructures the arguments to match langchain tool run
+    # No .copy() needed, as we don't mutate `args`
     def proxy(*args: Any, **kwargs: Any) -> str:
         assert not args, 'This should always be called with kwargs'
-        kwargs = defaults | kwargs
-        return langchain_tool.run(kwargs)
+        # Avoid temporary dict: update a local copy instead of new dict merge
+        merged = defaults.copy()
+        merged.update(kwargs)
+        return langchain_tool.run(merged)
 
-    return Tool.from_schema(
+    return BaseTool.from_schema(
         function=proxy,
-        name=function_name,
-        description=function_description,
+        name=name,
+        description=desc,
         json_schema=schema,
     )
