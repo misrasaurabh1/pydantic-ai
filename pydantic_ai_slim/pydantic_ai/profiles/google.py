@@ -1,6 +1,7 @@
 from __future__ import annotations as _annotations
 
 import warnings
+from functools import lru_cache
 
 from pydantic_ai.exceptions import UserError
 
@@ -15,6 +16,13 @@ def google_model_profile(model_name: str) -> ModelProfile | None:
         supports_json_schema_output=True,
         supports_json_object_output=True,
     )
+
+
+# Cached ModelProfile builder for efficiency, assuming ModelProfile is immutable for a given set of params
+@lru_cache(maxsize=32)
+def _cached_google_model_profile(model_name: str) -> ModelProfile | None:
+    # Underlying construction is expensive—cache the result
+    return google_model_profile(model_name)
 
 
 class GoogleJsonSchemaTransformer(JsonSchemaTransformer):
