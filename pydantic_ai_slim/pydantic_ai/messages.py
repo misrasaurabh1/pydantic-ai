@@ -624,12 +624,15 @@ class ToolCallPart:
 
         This is just for convenience with models that require dicts as input.
         """
-        if not self.args:
+        v = self.args
+        if not v:
             return {}
-        if isinstance(self.args, dict):
-            return self.args
-        args = pydantic_core.from_json(self.args)
-        assert isinstance(args, dict), 'args should be a dict'
+        if isinstance(v, dict):
+            return v
+        # Directly cast result for efficiency after type check
+        args = pydantic_core.from_json(v)
+        if type(args) is not dict:
+            raise AssertionError('args should be a dict')  # Faster than isinstance for this check
         return cast(dict[str, Any], args)
 
     def args_as_json_str(self) -> str:
