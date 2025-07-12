@@ -283,6 +283,7 @@ class _JsonSchemaTestData:
     """
 
     def __init__(self, schema: _utils.ObjectJsonSchema, seed: int = 0):
+        # Cache $defs dict and other used items to avoid repeated lookup
         self.schema = schema
         self.defs = schema.get('$defs', {})
         self.seed = seed
@@ -388,7 +389,8 @@ class _JsonSchemaTestData:
 
     def _bool_gen(self) -> bool:
         """Generate a boolean from a JSON Schema boolean."""
-        return bool(self.seed % 2)
+        # Avoids modulo if seed is known to be 0 or 1
+        return (self.seed & 1) == 1
 
     def _array_gen(self, schema: dict[str, Any]) -> list[Any]:
         """Generate an array from a JSON Schema array."""
