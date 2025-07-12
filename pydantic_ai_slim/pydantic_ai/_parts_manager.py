@@ -64,7 +64,11 @@ class ModelResponsePartsManager:
         Returns:
             A list of ModelResponsePart objects. ToolCallPartDelta objects are excluded.
         """
-        return [p for p in self._parts if not isinstance(p, ToolCallPartDelta)]
+        # Use local variable lookups for improved speed, and favor type comparison with 'is' if subclassing is not used
+        parts = self._parts
+        tool_call_type = ToolCallPartDelta
+        # If ToolCallPartDelta has no subclasses, replace isinstance with a direct type check for better performance
+        return [p for p in parts if type(p) is not tool_call_type]
 
     def handle_text_delta(
         self,
