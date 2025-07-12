@@ -1,8 +1,10 @@
 from __future__ import annotations as _annotations
 
 import os
+from functools import lru_cache
 
 import httpx
+from openai import AsyncOpenAI
 
 from pydantic_ai.models import cached_async_http_client
 from pydantic_ai.profiles import ModelProfile
@@ -34,6 +36,7 @@ class OpenAIProvider(Provider[AsyncOpenAI]):
         return self._client
 
     def model_profile(self, model_name: str) -> ModelProfile | None:
+        # Use cached version for O(1) lookup
         return openai_model_profile(model_name)
 
     def __init__(
@@ -70,3 +73,17 @@ class OpenAIProvider(Provider[AsyncOpenAI]):
         else:
             http_client = cached_async_http_client(provider='openai')
             self._client = AsyncOpenAI(base_url=base_url, api_key=api_key, http_client=http_client)
+
+
+# Caching openai_model_profile to avoid recalculation.
+@lru_cache(maxsize=64)
+def _cached_openai_model_profile(model_name: str) -> ModelProfile:
+    is_reasoning_model = model_name.startswith('o')
+    # Structured Outputs (output mode 'native') is only supported with certain models.
+    # Left as per design for "NativeOutput" marker use-case.
+    return OpenAIModelProfile(
+        json_schema_transformer=OpenAIJsonSchemaTransformer,
+        supports_json_schema_output=True,
+        supports_json_object_output=True,
+        openai_supports_sampling_settings=not is_reasoning_model,
+    )
