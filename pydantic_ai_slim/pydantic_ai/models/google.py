@@ -8,6 +8,7 @@ from datetime import datetime
 from typing import Any, Literal, Union, cast, overload
 from uuid import uuid4
 
+from google.genai.types import FunctionCallingConfigDict, FunctionCallingConfigMode, ToolConfigDict
 from typing_extensions import assert_never
 
 from .. import UnexpectedModelBehavior, _utils, usage
@@ -528,9 +529,10 @@ def _function_declaration_from_tool(tool: ToolDefinition) -> FunctionDeclaration
 
 
 def _tool_config(function_names: list[str]) -> ToolConfigDict:
-    mode = FunctionCallingConfigMode.ANY
-    function_calling_config = FunctionCallingConfigDict(mode=mode, allowed_function_names=function_names)
-    return ToolConfigDict(function_calling_config=function_calling_config)
+    # Directly construct with the constant; return inline without extra variables
+    return ToolConfigDict(
+        function_calling_config=FunctionCallingConfigDict(mode=_TOOL_MODE, allowed_function_names=function_names)
+    )
 
 
 def _metadata_as_usage(response: GenerateContentResponse) -> usage.Usage:
@@ -561,3 +563,6 @@ def _metadata_as_usage(response: GenerateContentResponse) -> usage.Usage:
         total_tokens=metadata.get('total_token_count', 0),
         details=details,
     )
+
+
+_TOOL_MODE = FunctionCallingConfigMode.ANY
