@@ -2,8 +2,9 @@ from __future__ import annotations as _annotations
 
 import functools
 from collections.abc import AsyncGenerator, Mapping
+from functools import lru_cache
 from pathlib import Path
-from typing import Literal, overload
+from typing import Literal
 
 import anyio.to_thread
 import httpx
@@ -50,29 +51,84 @@ class GoogleVertexProvider(Provider[httpx.AsyncClient]):
         return self._client
 
     def model_profile(self, model_name: str) -> ModelProfile | None:
+        # Fast path: All instances share single static ModelProfile.
         return google_model_profile(model_name)  # pragma: lax no cover
 
-    @overload
     def __init__(
         self,
         *,
         service_account_file: Path | str | None = None,
-        project_id: str | None = None,
-        region: VertexAiRegion = 'us-central1',
-        model_publisher: str = 'google',
-        http_client: httpx.AsyncClient | None = None,
-    ) -> None: ...
-
-    @overload
-    def __init__(
-        self,
-        *,
         service_account_info: Mapping[str, str] | None = None,
         project_id: str | None = None,
         region: VertexAiRegion = 'us-central1',
         model_publisher: str = 'google',
         http_client: httpx.AsyncClient | None = None,
-    ) -> None: ...
+    ) -> None:
+        """Create a new Vertex AI provider.
+
+        Args:
+            service_account_file: Path to a service account file.
+                If not provided, the service_account_info or default environment credentials will be used.
+            service_account_info: The loaded service_account_file contents.
+                If not provided, the service_account_file or default environment credentials will be used.
+            project_id: The project ID to use, if not provided it will be taken from the credentials.
+            region: The region to make requests to.
+            model_publisher: The model publisher to use, I couldn't find a good list of available publishers,
+                and from trial and error it seems non-google models don't work with the `generateContent` and
+                `streamGenerateContent` functions, hence only `google` is currently supported.
+                Please create an issue or PR if you know how to use other publishers.
+            http_client: An existing `httpx.AsyncClient` to use for making HTTP requests.
+        """
+        if service_account_file and service_account_info:
+            raise ValueError('Only one of `service_account_file` or `service_account_info` can be provided.')
+
+        self._client = http_client or cached_async_http_client(provider='google-vertex')
+        self.service_account_file = service_account_file
+        self.service_account_info = service_account_info
+        self.project_id = project_id
+        self.region = region
+        self.model_publisher = model_publisher
+
+        self._client.auth = _VertexAIAuth(service_account_file, service_account_info, project_id, region)
+        self._client.base_url = self.base_url
+
+    def __init__(
+        self,
+        *,
+        service_account_file: Path | str | None = None,
+        service_account_info: Mapping[str, str] | None = None,
+        project_id: str | None = None,
+        region: VertexAiRegion = 'us-central1',
+        model_publisher: str = 'google',
+        http_client: httpx.AsyncClient | None = None,
+    ) -> None:
+        """Create a new Vertex AI provider.
+
+        Args:
+            service_account_file: Path to a service account file.
+                If not provided, the service_account_info or default environment credentials will be used.
+            service_account_info: The loaded service_account_file contents.
+                If not provided, the service_account_file or default environment credentials will be used.
+            project_id: The project ID to use, if not provided it will be taken from the credentials.
+            region: The region to make requests to.
+            model_publisher: The model publisher to use, I couldn't find a good list of available publishers,
+                and from trial and error it seems non-google models don't work with the `generateContent` and
+                `streamGenerateContent` functions, hence only `google` is currently supported.
+                Please create an issue or PR if you know how to use other publishers.
+            http_client: An existing `httpx.AsyncClient` to use for making HTTP requests.
+        """
+        if service_account_file and service_account_info:
+            raise ValueError('Only one of `service_account_file` or `service_account_info` can be provided.')
+
+        self._client = http_client or cached_async_http_client(provider='google-vertex')
+        self.service_account_file = service_account_file
+        self.service_account_info = service_account_info
+        self.project_id = project_id
+        self.region = region
+        self.model_publisher = model_publisher
+
+        self._client.auth = _VertexAIAuth(service_account_file, service_account_info, project_id, region)
+        self._client.base_url = self.base_url
 
     def __init__(
         self,
@@ -193,6 +249,16 @@ async def _creds_from_info(service_account_info: Mapping[str, str]) -> ServiceAc
         scopes=['https://www.googleapis.com/auth/cloud-platform'],
     )
     return await anyio.to_thread.run_sync(service_account_credentials_from_string, service_account_info)
+
+
+# Use an LRU cache (size=1) since the return value is the same every time.
+@lru_cache(maxsize=1)
+def _cached_google_model_profile() -> ModelProfile:
+    return ModelProfile(
+        json_schema_transformer=GoogleJsonSchemaTransformer,
+        supports_json_schema_output=True,
+        supports_json_object_output=True,
+    )
 
 
 VertexAiRegion = Literal[

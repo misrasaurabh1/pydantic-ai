@@ -1,6 +1,7 @@
 from __future__ import annotations as _annotations
 
 import warnings
+from functools import lru_cache
 
 from pydantic_ai.exceptions import UserError
 
@@ -10,6 +11,12 @@ from ._json_schema import JsonSchema, JsonSchemaTransformer
 
 def google_model_profile(model_name: str) -> ModelProfile | None:
     """Get the model profile for a Google model."""
+    return _cached_google_model_profile()
+
+
+# Use an LRU cache (size=1) since the return value is the same every time.
+@lru_cache(maxsize=1)
+def _cached_google_model_profile() -> ModelProfile:
     return ModelProfile(
         json_schema_transformer=GoogleJsonSchemaTransformer,
         supports_json_schema_output=True,
