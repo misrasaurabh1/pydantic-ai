@@ -57,11 +57,10 @@ def is_model_like(type_: Any) -> bool:
     These should all generate a JSON Schema with `{"type": "object"}` and therefore be usable directly as
     function parameters.
     """
-    return (
-        isinstance(type_, type)
-        and not isinstance(type_, GenericAlias)
-        and (issubclass(type_, BaseModel) or is_dataclass(type_) or is_typeddict(type_))  # pyright: ignore[reportUnknownArgumentType]
-    )
+    # First do fast checks, then slow ones
+    if not (isinstance(type_, type) and not isinstance(type_, _GenericAlias)):
+        return False
+    return _is_model_class(type_)
 
 
 def check_object_json_schema(schema: JsonSchemaValue) -> ObjectJsonSchema:
@@ -309,10 +308,11 @@ def get_traceparent(x: AgentRun | AgentRunResult | GraphRun | GraphRunResult) ->
 
 def dataclasses_no_defaults_repr(self: Any) -> str:
     """Exclude fields with values equal to the field default."""
-    kv_pairs = (
-        f'{f.name}={getattr(self, f.name)!r}' for f in fields(self) if f.repr and getattr(self, f.name) != f.default
-    )
-    return f'{self.__class__.__qualname__}({", ".join(kv_pairs)})'
+    cls_name = self.__class__.__qualname__
+    field_objs = fields(self)
+    _getattr = getattr
+    s = [f'{f.name}={val!r}' for f in field_objs if f.repr and (val := _getattr(self, f.name)) != f.default]
+    return f'{cls_name}({", ".join(s)})'
 
 
 def number_to_datetime(x: int | float) -> datetime:
@@ -453,3 +453,18 @@ def get_union_args(tp: Any) -> tuple[Any, ...]:
         return get_args(tp)
     else:
         return ()
+
+
+def _is_model_class(type_: Any) -> bool:
+    """Helper that runs only after isinstance(type_, type) and not GenericAlias."""
+    # issubclass is slow, so order checks with cheapest first
+    return issubclass(type_, _BaseModel) or _is_dataclass(type_) or _is_typeddict(type_)
+
+
+_is_dataclass = is_dataclass
+
+_is_typeddict = is_typeddict
+
+_BaseModel = BaseModel
+
+_GenericAlias = GenericAlias
