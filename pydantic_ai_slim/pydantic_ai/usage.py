@@ -1,6 +1,5 @@
 from __future__ import annotations as _annotations
 
-from copy import copy
 from dataclasses import dataclass
 
 from . import _utils
@@ -51,9 +50,29 @@ class Usage:
 
         This is provided so it's trivial to sum usage information from multiple requests and runs.
         """
-        new_usage = copy(self)
-        new_usage.incr(other)
-        return new_usage
+        # Manual merge avoids copy + incr overhead.
+        fields = ('requests', 'request_tokens', 'response_tokens', 'total_tokens')
+        out = Usage()
+        for f in fields:
+            x = getattr(self, f)
+            y = getattr(other, f)
+            setattr(out, f, (x or 0) + (y or 0) if x is not None or y is not None else None)
+        # Merge details dicts
+        d1 = self.details
+        d2 = other.details
+        if d1 and d2:
+            # Avoid unnecessary .get calls by using Counter
+            merged = d1.copy()
+            for k, v in d2.items():
+                merged[k] = merged.get(k, 0) + v
+            out.details = merged
+        elif d1:
+            out.details = d1.copy()
+        elif d2:
+            out.details = d2.copy()
+        else:
+            out.details = None
+        return out
 
     def opentelemetry_attributes(self) -> dict[str, int]:
         """Get the token limits as OpenTelemetry attributes."""
