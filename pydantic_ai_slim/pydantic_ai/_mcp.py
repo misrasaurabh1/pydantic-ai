@@ -1,6 +1,7 @@
 import base64
 from collections.abc import Sequence
-from typing import Literal
+
+from mcp import types as mcp_types
 
 from . import exceptions, messages
 
@@ -61,56 +62,68 @@ def map_from_pai_messages(pai_messages: list[messages.ModelMessage]) -> tuple[st
         A tuple containing the system prompt and a list of sampling messages.
     """
     sampling_msgs: list[mcp_types.SamplingMessage] = []
-
-    def add_msg(
-        role: Literal['user', 'assistant'],
-        content: mcp_types.TextContent | mcp_types.ImageContent | mcp_types.AudioContent,
-    ):
-        sampling_msgs.append(mcp_types.SamplingMessage(role=role, content=content))
-
     system_prompt: list[str] = []
+    append_sampling = sampling_msgs.append
+    extend_prompt = system_prompt.extend
     for pai_message in pai_messages:
         if isinstance(pai_message, messages.ModelRequest):
-            if pai_message.instructions is not None:
-                system_prompt.append(pai_message.instructions)
-
-            for part in pai_message.parts:
+            instructions = pai_message.instructions
+            if instructions is not None:
+                system_prompt.append(instructions)
+            parts = pai_message.parts
+            for part in parts:
+                # Sequence optimized: check type only once
                 if isinstance(part, messages.SystemPromptPart):
                     system_prompt.append(part.content)
-                if isinstance(part, messages.UserPromptPart):
-                    if isinstance(part.content, str):
-                        add_msg('user', mcp_types.TextContent(type='text', text=part.content))
+                elif isinstance(part, messages.UserPromptPart):
+                    content = part.content
+                    # Fast-path: string user prompt
+                    if isinstance(content, str):
+                        append_sampling(mcp_types.SamplingMessage(
+                            role='user',
+                            content=mcp_types.TextContent(type='text', text=content)
+                        ))
                     else:
-                        for chunk in part.content:
+                        for chunk in content:
                             if isinstance(chunk, str):
-                                add_msg('user', mcp_types.TextContent(type='text', text=chunk))
+                                append_sampling(mcp_types.SamplingMessage(
+                                    role='user',
+                                    content=mcp_types.TextContent(type='text', text=chunk)
+                                ))
                             elif isinstance(chunk, messages.BinaryContent) and chunk.is_image:
-                                add_msg(
-                                    'user',
-                                    mcp_types.ImageContent(
+                                append_sampling(mcp_types.SamplingMessage(
+                                    role='user',
+                                    content=mcp_types.ImageContent(
                                         type='image',
                                         data=base64.b64decode(chunk.data).decode(),
                                         mimeType=chunk.media_type,
-                                    ),
-                                )
+                                    )
+                                ))
                             # TODO(Marcelo): Add support for audio content.
                             else:
                                 raise NotImplementedError(f'Unsupported content type: {type(chunk)}')
         else:
-            add_msg('assistant', map_from_model_response(pai_message))
+            # Hotpath: only check type of response once in callee.
+            append_sampling(mcp_types.SamplingMessage(
+                role='assistant',
+                content=map_from_model_response(pai_message)
+            ))
     return ''.join(system_prompt), sampling_msgs
 
 
 def map_from_model_response(model_response: messages.ModelResponse) -> mcp_types.TextContent:
     """Convert from a model response to MCP text content."""
-    text_parts: list[str] = []
-    for part in model_response.parts:
+    # Optimize: List comp for max speed, raising as soon as non-TextPart found.
+    parts = model_response.parts
+    texts = []
+    for part in parts:
         if isinstance(part, messages.TextPart):
-            text_parts.append(part.content)
-        # TODO(Marcelo): We should ignore ThinkingPart here.
+            texts.append(part.content)
         else:
-            raise exceptions.UnexpectedModelBehavior(f'Unexpected part type: {type(part).__name__}, expected TextPart')
-    return mcp_types.TextContent(type='text', text=''.join(text_parts))
+            raise exceptions.UnexpectedModelBehavior(
+                f'Unexpected part type: {type(part).__name__}, expected TextPart'
+            )
+    return mcp_types.TextContent(type='text', text=''.join(texts))
 
 
 def map_from_sampling_content(
