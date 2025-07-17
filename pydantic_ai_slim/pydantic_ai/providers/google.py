@@ -1,8 +1,10 @@
 from __future__ import annotations as _annotations
 
 import os
-from typing import Literal, overload
+from typing import Literal
 
+from google import genai
+from google.auth.credentials import Credentials
 from pydantic_ai.exceptions import UserError
 from pydantic_ai.models import get_user_agent
 from pydantic_ai.profiles import ModelProfile
@@ -37,23 +39,63 @@ class GoogleProvider(Provider[genai.Client]):
     def model_profile(self, model_name: str) -> ModelProfile | None:
         return google_model_profile(model_name)
 
-    @overload
-    def __init__(self, *, api_key: str) -> None: ...
-
-    @overload
     def __init__(
         self,
         *,
+        api_key: str | None = None,
         credentials: Credentials | None = None,
         project: str | None = None,
         location: VertexAILocation | Literal['global'] | None = None,
-    ) -> None: ...
+        client: genai.Client | None = None,
+        vertexai: bool | None = None,
+    ) -> None:
+        """Create a new Google provider.
 
-    @overload
-    def __init__(self, *, client: genai.Client) -> None: ...
+        Args:
+            api_key: The `API key <https://ai.google.dev/gemini-api/docs/api-key>`_ to
+                use for authentication. It can also be set via the `GOOGLE_API_KEY` environment variable.
+                Applies to the Gemini Developer API only.
+            credentials: The credentials to use for authentication when calling the Vertex AI APIs. Credentials can be
+                obtained from environment variables and default credentials. For more information, see Set up
+                Application Default Credentials. Applies to the Vertex AI API only.
+            project: The Google Cloud project ID to use for quota. Can be obtained from environment variables
+                (for example, GOOGLE_CLOUD_PROJECT). Applies to the Vertex AI API only.
+            location: The location to send API requests to (for example, us-central1). Can be obtained from environment variables.
+                Applies to the Vertex AI API only.
+            client: A pre-initialized client to use.
+            vertexai: Force the use of the Vertex AI API. If `False`, the Google Generative Language API will be used.
+                Defaults to `False`.
+        """
+        if client is None:
+            # NOTE: We are keeping GEMINI_API_KEY for backwards compatibility.
+            api_key = api_key or os.getenv('GOOGLE_API_KEY') or os.getenv('GEMINI_API_KEY')
 
-    @overload
-    def __init__(self, *, vertexai: bool = False) -> None: ...
+            if vertexai is None:
+                # Optimize: Store bool result instead of recomputing condition repeatedly.
+                vertexai = bool(location or project or credentials)
+
+            if not vertexai:
+                if api_key is None:
+                    raise UserError(  # pragma: no cover
+                        'Set the `GOOGLE_API_KEY` environment variable or pass it via `GoogleProvider(api_key=...)`'
+                        'to use the Google Generative Language API.'
+                    )
+                self._client = genai.Client(
+                    vertexai=vertexai,
+                    api_key=api_key,
+                    http_options={'headers': {'User-Agent': get_user_agent()}},
+                )
+            else:
+                self._client = genai.Client(
+                    vertexai=vertexai,
+                    project=project or os.environ.get('GOOGLE_CLOUD_PROJECT'),
+                    # See upstream comment for the available locations.
+                    location=location or os.environ.get('GOOGLE_CLOUD_LOCATION') or 'us-central1',
+                    credentials=credentials,
+                    http_options={'headers': {'User-Agent': get_user_agent()}},
+                )
+        else:
+            self._client = client
 
     def __init__(
         self,
@@ -87,6 +129,7 @@ class GoogleProvider(Provider[genai.Client]):
             api_key = api_key or os.getenv('GOOGLE_API_KEY') or os.getenv('GEMINI_API_KEY')
 
             if vertexai is None:
+                # Optimize: Store bool result instead of recomputing condition repeatedly.
                 vertexai = bool(location or project or credentials)
 
             if not vertexai:
@@ -104,11 +147,181 @@ class GoogleProvider(Provider[genai.Client]):
                 self._client = genai.Client(
                     vertexai=vertexai,
                     project=project or os.environ.get('GOOGLE_CLOUD_PROJECT'),
-                    # From https://github.com/pydantic/pydantic-ai/pull/2031/files#r2169682149:
-                    # Currently `us-central1` supports the most models by far of any region including `global`, but not
-                    # all of them. `us-central1` has all google models but is missing some Anthropic partner models,
-                    # which use `us-east5` instead. `global` has fewer models but higher availability.
-                    # For more details, check: https://cloud.google.com/vertex-ai/generative-ai/docs/learn/locations#available-regions
+                    # See upstream comment for the available locations.
+                    location=location or os.environ.get('GOOGLE_CLOUD_LOCATION') or 'us-central1',
+                    credentials=credentials,
+                    http_options={'headers': {'User-Agent': get_user_agent()}},
+                )
+        else:
+            self._client = client
+
+    def __init__(
+        self,
+        *,
+        api_key: str | None = None,
+        credentials: Credentials | None = None,
+        project: str | None = None,
+        location: VertexAILocation | Literal['global'] | None = None,
+        client: genai.Client | None = None,
+        vertexai: bool | None = None,
+    ) -> None:
+        """Create a new Google provider.
+
+        Args:
+            api_key: The `API key <https://ai.google.dev/gemini-api/docs/api-key>`_ to
+                use for authentication. It can also be set via the `GOOGLE_API_KEY` environment variable.
+                Applies to the Gemini Developer API only.
+            credentials: The credentials to use for authentication when calling the Vertex AI APIs. Credentials can be
+                obtained from environment variables and default credentials. For more information, see Set up
+                Application Default Credentials. Applies to the Vertex AI API only.
+            project: The Google Cloud project ID to use for quota. Can be obtained from environment variables
+                (for example, GOOGLE_CLOUD_PROJECT). Applies to the Vertex AI API only.
+            location: The location to send API requests to (for example, us-central1). Can be obtained from environment variables.
+                Applies to the Vertex AI API only.
+            client: A pre-initialized client to use.
+            vertexai: Force the use of the Vertex AI API. If `False`, the Google Generative Language API will be used.
+                Defaults to `False`.
+        """
+        if client is None:
+            # NOTE: We are keeping GEMINI_API_KEY for backwards compatibility.
+            api_key = api_key or os.getenv('GOOGLE_API_KEY') or os.getenv('GEMINI_API_KEY')
+
+            if vertexai is None:
+                # Optimize: Store bool result instead of recomputing condition repeatedly.
+                vertexai = bool(location or project or credentials)
+
+            if not vertexai:
+                if api_key is None:
+                    raise UserError(  # pragma: no cover
+                        'Set the `GOOGLE_API_KEY` environment variable or pass it via `GoogleProvider(api_key=...)`'
+                        'to use the Google Generative Language API.'
+                    )
+                self._client = genai.Client(
+                    vertexai=vertexai,
+                    api_key=api_key,
+                    http_options={'headers': {'User-Agent': get_user_agent()}},
+                )
+            else:
+                self._client = genai.Client(
+                    vertexai=vertexai,
+                    project=project or os.environ.get('GOOGLE_CLOUD_PROJECT'),
+                    # See upstream comment for the available locations.
+                    location=location or os.environ.get('GOOGLE_CLOUD_LOCATION') or 'us-central1',
+                    credentials=credentials,
+                    http_options={'headers': {'User-Agent': get_user_agent()}},
+                )
+        else:
+            self._client = client
+
+    def __init__(
+        self,
+        *,
+        api_key: str | None = None,
+        credentials: Credentials | None = None,
+        project: str | None = None,
+        location: VertexAILocation | Literal['global'] | None = None,
+        client: genai.Client | None = None,
+        vertexai: bool | None = None,
+    ) -> None:
+        """Create a new Google provider.
+
+        Args:
+            api_key: The `API key <https://ai.google.dev/gemini-api/docs/api-key>`_ to
+                use for authentication. It can also be set via the `GOOGLE_API_KEY` environment variable.
+                Applies to the Gemini Developer API only.
+            credentials: The credentials to use for authentication when calling the Vertex AI APIs. Credentials can be
+                obtained from environment variables and default credentials. For more information, see Set up
+                Application Default Credentials. Applies to the Vertex AI API only.
+            project: The Google Cloud project ID to use for quota. Can be obtained from environment variables
+                (for example, GOOGLE_CLOUD_PROJECT). Applies to the Vertex AI API only.
+            location: The location to send API requests to (for example, us-central1). Can be obtained from environment variables.
+                Applies to the Vertex AI API only.
+            client: A pre-initialized client to use.
+            vertexai: Force the use of the Vertex AI API. If `False`, the Google Generative Language API will be used.
+                Defaults to `False`.
+        """
+        if client is None:
+            # NOTE: We are keeping GEMINI_API_KEY for backwards compatibility.
+            api_key = api_key or os.getenv('GOOGLE_API_KEY') or os.getenv('GEMINI_API_KEY')
+
+            if vertexai is None:
+                # Optimize: Store bool result instead of recomputing condition repeatedly.
+                vertexai = bool(location or project or credentials)
+
+            if not vertexai:
+                if api_key is None:
+                    raise UserError(  # pragma: no cover
+                        'Set the `GOOGLE_API_KEY` environment variable or pass it via `GoogleProvider(api_key=...)`'
+                        'to use the Google Generative Language API.'
+                    )
+                self._client = genai.Client(
+                    vertexai=vertexai,
+                    api_key=api_key,
+                    http_options={'headers': {'User-Agent': get_user_agent()}},
+                )
+            else:
+                self._client = genai.Client(
+                    vertexai=vertexai,
+                    project=project or os.environ.get('GOOGLE_CLOUD_PROJECT'),
+                    # See upstream comment for the available locations.
+                    location=location or os.environ.get('GOOGLE_CLOUD_LOCATION') or 'us-central1',
+                    credentials=credentials,
+                    http_options={'headers': {'User-Agent': get_user_agent()}},
+                )
+        else:
+            self._client = client
+
+    def __init__(
+        self,
+        *,
+        api_key: str | None = None,
+        credentials: Credentials | None = None,
+        project: str | None = None,
+        location: VertexAILocation | Literal['global'] | None = None,
+        client: genai.Client | None = None,
+        vertexai: bool | None = None,
+    ) -> None:
+        """Create a new Google provider.
+
+        Args:
+            api_key: The `API key <https://ai.google.dev/gemini-api/docs/api-key>`_ to
+                use for authentication. It can also be set via the `GOOGLE_API_KEY` environment variable.
+                Applies to the Gemini Developer API only.
+            credentials: The credentials to use for authentication when calling the Vertex AI APIs. Credentials can be
+                obtained from environment variables and default credentials. For more information, see Set up
+                Application Default Credentials. Applies to the Vertex AI API only.
+            project: The Google Cloud project ID to use for quota. Can be obtained from environment variables
+                (for example, GOOGLE_CLOUD_PROJECT). Applies to the Vertex AI API only.
+            location: The location to send API requests to (for example, us-central1). Can be obtained from environment variables.
+                Applies to the Vertex AI API only.
+            client: A pre-initialized client to use.
+            vertexai: Force the use of the Vertex AI API. If `False`, the Google Generative Language API will be used.
+                Defaults to `False`.
+        """
+        if client is None:
+            # NOTE: We are keeping GEMINI_API_KEY for backwards compatibility.
+            api_key = api_key or os.getenv('GOOGLE_API_KEY') or os.getenv('GEMINI_API_KEY')
+
+            if vertexai is None:
+                # Optimize: Store bool result instead of recomputing condition repeatedly.
+                vertexai = bool(location or project or credentials)
+
+            if not vertexai:
+                if api_key is None:
+                    raise UserError(  # pragma: no cover
+                        'Set the `GOOGLE_API_KEY` environment variable or pass it via `GoogleProvider(api_key=...)`'
+                        'to use the Google Generative Language API.'
+                    )
+                self._client = genai.Client(
+                    vertexai=vertexai,
+                    api_key=api_key,
+                    http_options={'headers': {'User-Agent': get_user_agent()}},
+                )
+            else:
+                self._client = genai.Client(
+                    vertexai=vertexai,
+                    project=project or os.environ.get('GOOGLE_CLOUD_PROJECT'),
+                    # See upstream comment for the available locations.
                     location=location or os.environ.get('GOOGLE_CLOUD_LOCATION') or 'us-central1',
                     credentials=credentials,
                     http_options={'headers': {'User-Agent': get_user_agent()}},
