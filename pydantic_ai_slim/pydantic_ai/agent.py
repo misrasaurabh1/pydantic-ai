@@ -12,8 +12,15 @@ from copy import deepcopy
 from types import FrameType
 from typing import TYPE_CHECKING, Any, Callable, ClassVar, Generic, cast, final, overload
 
+from fasta2a.applications import FastA2A
+from fasta2a.broker import Broker
+from fasta2a.schema import AgentProvider, Skill
+from fasta2a.storage import Storage
 from opentelemetry.trace import NoOpTracer, use_span
 from pydantic.json_schema import GenerateJsonSchema
+from starlette.middleware import Middleware
+from starlette.routing import Route
+from starlette.types import ExceptionHandler, Lifespan
 from typing_extensions import Literal, Never, Self, TypeIs, TypeVar, deprecated
 
 from pydantic_graph import End, Graph, GraphRun, GraphRunContext
@@ -71,8 +78,6 @@ if TYPE_CHECKING:
     from starlette.middleware import Middleware
     from starlette.routing import Route
     from starlette.types import ExceptionHandler, Lifespan
-
-    from pydantic_ai.mcp import MCPServer
 
 
 __all__ = (
@@ -171,12 +176,12 @@ class Agent(Generic[AgentDepsT, OutputDataT]):
     _entered_count: int = dataclasses.field(repr=False)
     _exit_stack: AsyncExitStack | None = dataclasses.field(repr=False)
 
-    @overload
     def __init__(
         self,
         model: models.Model | models.KnownModelName | str | None = None,
         *,
-        output_type: OutputSpec[OutputDataT] = str,
+        # TODO change this back to `output_type: _output.OutputType[OutputDataT] = str,` when we remove the overloads
+        output_type: Any = str,
         instructions: str
         | _system_prompt.SystemPromptFunc[AgentDepsT]
         | Sequence[str | _system_prompt.SystemPromptFunc[AgentDepsT]]
@@ -195,17 +200,164 @@ class Agent(Generic[AgentDepsT, OutputDataT]):
         end_strategy: EndStrategy = 'early',
         instrument: InstrumentationSettings | bool | None = None,
         history_processors: Sequence[HistoryProcessor[AgentDepsT]] | None = None,
-    ) -> None: ...
+        **_deprecated_kwargs: Any,
+    ):
+        """Create an agent.
 
-    @overload
-    @deprecated(
-        '`result_type`, `result_tool_name` & `result_tool_description` are deprecated, use `output_type` instead. `result_retries` is deprecated, use `output_retries` instead.'
-    )
+        Args:
+            model: The default model to use for this agent, if not provide,
+                you must provide the model when calling it. We allow `str` here since the actual list of allowed models changes frequently.
+            output_type: The type of the output data, used to validate the data returned by the model,
+                defaults to `str`.
+            instructions: Instructions to use for this agent, you can also register instructions via a function with
+                [`instructions`][pydantic_ai.Agent.instructions].
+            system_prompt: Static system prompts to use for this agent, you can also register system
+                prompts via a function with [`system_prompt`][pydantic_ai.Agent.system_prompt].
+            deps_type: The type used for dependency injection, this parameter exists solely to allow you to fully
+                parameterize the agent, and therefore get the best out of static type checking.
+                If you're not using deps, but want type checking to pass, you can set `deps=None` to satisfy Pyright
+                or add a type hint `: Agent[None, <return type>]`.
+            name: The name of the agent, used for logging. If `None`, we try to infer the agent name from the call frame
+                when the agent is first run.
+            model_settings: Optional model request settings to use for this agent's runs, by default.
+            retries: The default number of retries to allow before raising an error.
+            output_retries: The maximum number of retries to allow for output validation, defaults to `retries`.
+            tools: Tools to register with the agent, you can also register tools via the decorators
+                [`@agent.tool`][pydantic_ai.Agent.tool] and [`@agent.tool_plain`][pydantic_ai.Agent.tool_plain].
+            prepare_tools: Custom function to prepare the tool definition of all tools for each step, except output tools.
+                This is useful if you want to customize the definition of multiple tools or you want to register
+                a subset of tools for a given step. See [`ToolsPrepareFunc`][pydantic_ai.tools.ToolsPrepareFunc]
+            prepare_output_tools: Custom function to prepare the tool definition of all output tools for each step.
+                This is useful if you want to customize the definition of multiple output tools or you want to register
+                a subset of output tools for a given step. See [`ToolsPrepareFunc`][pydantic_ai.tools.ToolsPrepareFunc]
+            toolsets: Toolsets to register with the agent, including MCP servers.
+            defer_model_check: by default, if you provide a [named][pydantic_ai.models.KnownModelName] model,
+                it's evaluated to create a [`Model`][pydantic_ai.models.Model] instance immediately,
+                which checks for the necessary environment variables. Set this to `false`
+                to defer the evaluation until the first run. Useful if you want to
+                [override the model][pydantic_ai.Agent.override] for testing.
+            end_strategy: Strategy for handling tool calls that are requested alongside a final result.
+                See [`EndStrategy`][pydantic_ai.agent.EndStrategy] for more information.
+            instrument: Set to True to automatically instrument with OpenTelemetry,
+                which will use Logfire if it's configured.
+                Set to an instance of [`InstrumentationSettings`][pydantic_ai.agent.InstrumentationSettings] to customize.
+                If this isn't set, then the last value set by
+                [`Agent.instrument_all()`][pydantic_ai.Agent.instrument_all]
+                will be used, which defaults to False.
+                See the [Debugging and Monitoring guide](https://ai.pydantic.dev/logfire/) for more info.
+            history_processors: Optional list of callables to process the message history before sending it to the model.
+                Each processor takes a list of messages and returns a modified list of messages.
+                Processors can be sync or async and are applied in sequence.
+        """
+        if model is None or defer_model_check:
+            self.model = model
+        else:
+            self.model = models.infer_model(model)
+
+        self.end_strategy = end_strategy
+        self.name = name
+        self.model_settings = model_settings
+
+        if 'result_type' in _deprecated_kwargs:
+            if output_type is not str:  # pragma: no cover
+                raise TypeError('`result_type` and `output_type` cannot be set at the same time.')
+            warnings.warn('`result_type` is deprecated, use `output_type` instead', DeprecationWarning, stacklevel=2)
+            output_type = _deprecated_kwargs.pop('result_type')
+
+        self.output_type = output_type
+
+        self.instrument = instrument
+
+        self._deps_type = deps_type
+
+        self._deprecated_result_tool_name = _deprecated_kwargs.pop('result_tool_name', None)
+        if self._deprecated_result_tool_name is not None:
+            warnings.warn(
+                '`result_tool_name` is deprecated, use `output_type` with `ToolOutput` instead',
+                DeprecationWarning,
+                stacklevel=2,
+            )
+
+        self._deprecated_result_tool_description = _deprecated_kwargs.pop('result_tool_description', None)
+        if self._deprecated_result_tool_description is not None:
+            warnings.warn(
+                '`result_tool_description` is deprecated, use `output_type` with `ToolOutput` instead',
+                DeprecationWarning,
+                stacklevel=2,
+            )
+        result_retries = _deprecated_kwargs.pop('result_retries', None)
+        if result_retries is not None:
+            if output_retries is not None:  # pragma: no cover
+                raise TypeError('`output_retries` and `result_retries` cannot be set at the same time.')
+            warnings.warn(
+                '`result_retries` is deprecated, use `max_result_retries` instead', DeprecationWarning, stacklevel=2
+            )
+            output_retries = result_retries
+
+        if mcp_servers := _deprecated_kwargs.pop('mcp_servers', None):
+            if toolsets is not None:  # pragma: no cover
+                raise TypeError('`mcp_servers` and `toolsets` cannot be set at the same time.')
+            warnings.warn('`mcp_servers` is deprecated, use `toolsets` instead', DeprecationWarning)
+            toolsets = mcp_servers
+
+        _utils.validate_empty_kwargs(_deprecated_kwargs)
+
+        default_output_mode = (
+            self.model.profile.default_structured_output_mode if isinstance(self.model, models.Model) else None
+        )
+
+        self._output_schema = _output.OutputSchema[OutputDataT].build(
+            output_type,
+            default_mode=default_output_mode,
+            name=self._deprecated_result_tool_name,
+            description=self._deprecated_result_tool_description,
+        )
+        self._output_validators = []
+
+        self._instructions = ''
+        self._instructions_functions = []
+        if isinstance(instructions, (str, Callable)):
+            instructions = [instructions]
+        for instruction in instructions or []:
+            if isinstance(instruction, str):
+                self._instructions += instruction + '\n'
+            else:
+                self._instructions_functions.append(_system_prompt.SystemPromptRunner(instruction))
+        self._instructions = self._instructions.strip() or None
+
+        self._system_prompts = (system_prompt,) if isinstance(system_prompt, str) else tuple(system_prompt)
+        self._system_prompt_functions = []
+        self._system_prompt_dynamic_functions = {}
+
+        self._max_result_retries = output_retries if output_retries is not None else retries
+        self._prepare_tools = prepare_tools
+        self._prepare_output_tools = prepare_output_tools
+
+        self._output_toolset = self._output_schema.toolset
+        if self._output_toolset:
+            self._output_toolset.max_retries = self._max_result_retries
+
+        self._function_toolset = FunctionToolset(tools, max_retries=retries)
+        self._user_toolsets = toolsets or ()
+
+        self.history_processors = history_processors or []
+
+        self._override_deps: ContextVar[_utils.Option[AgentDepsT]] = ContextVar('_override_deps', default=None)
+        self._override_model: ContextVar[_utils.Option[models.Model]] = ContextVar('_override_model', default=None)
+        self._override_toolsets: ContextVar[_utils.Option[Sequence[AbstractToolset[AgentDepsT]]]] = ContextVar(
+            '_override_toolsets', default=None
+        )
+
+        self._enter_lock = _utils.get_async_lock()
+        self._entered_count = 0
+        self._exit_stack = None
+
     def __init__(
         self,
         model: models.Model | models.KnownModelName | str | None = None,
         *,
-        result_type: type[OutputDataT] = str,
+        # TODO change this back to `output_type: _output.OutputType[OutputDataT] = str,` when we remove the overloads
+        output_type: Any = str,
         instructions: str
         | _system_prompt.SystemPromptFunc[AgentDepsT]
         | Sequence[str | _system_prompt.SystemPromptFunc[AgentDepsT]]
@@ -215,9 +367,7 @@ class Agent(Generic[AgentDepsT, OutputDataT]):
         name: str | None = None,
         model_settings: ModelSettings | None = None,
         retries: int = 1,
-        result_tool_name: str = _output.DEFAULT_OUTPUT_TOOL_NAME,
-        result_tool_description: str | None = None,
-        result_retries: int | None = None,
+        output_retries: int | None = None,
         tools: Sequence[Tool[AgentDepsT] | ToolFuncEither[AgentDepsT, ...]] = (),
         prepare_tools: ToolsPrepareFunc[AgentDepsT] | None = None,
         prepare_output_tools: ToolsPrepareFunc[AgentDepsT] | None = None,
@@ -226,15 +376,164 @@ class Agent(Generic[AgentDepsT, OutputDataT]):
         end_strategy: EndStrategy = 'early',
         instrument: InstrumentationSettings | bool | None = None,
         history_processors: Sequence[HistoryProcessor[AgentDepsT]] | None = None,
-    ) -> None: ...
+        **_deprecated_kwargs: Any,
+    ):
+        """Create an agent.
 
-    @overload
-    @deprecated('`mcp_servers` is deprecated, use `toolsets` instead.')
+        Args:
+            model: The default model to use for this agent, if not provide,
+                you must provide the model when calling it. We allow `str` here since the actual list of allowed models changes frequently.
+            output_type: The type of the output data, used to validate the data returned by the model,
+                defaults to `str`.
+            instructions: Instructions to use for this agent, you can also register instructions via a function with
+                [`instructions`][pydantic_ai.Agent.instructions].
+            system_prompt: Static system prompts to use for this agent, you can also register system
+                prompts via a function with [`system_prompt`][pydantic_ai.Agent.system_prompt].
+            deps_type: The type used for dependency injection, this parameter exists solely to allow you to fully
+                parameterize the agent, and therefore get the best out of static type checking.
+                If you're not using deps, but want type checking to pass, you can set `deps=None` to satisfy Pyright
+                or add a type hint `: Agent[None, <return type>]`.
+            name: The name of the agent, used for logging. If `None`, we try to infer the agent name from the call frame
+                when the agent is first run.
+            model_settings: Optional model request settings to use for this agent's runs, by default.
+            retries: The default number of retries to allow before raising an error.
+            output_retries: The maximum number of retries to allow for output validation, defaults to `retries`.
+            tools: Tools to register with the agent, you can also register tools via the decorators
+                [`@agent.tool`][pydantic_ai.Agent.tool] and [`@agent.tool_plain`][pydantic_ai.Agent.tool_plain].
+            prepare_tools: Custom function to prepare the tool definition of all tools for each step, except output tools.
+                This is useful if you want to customize the definition of multiple tools or you want to register
+                a subset of tools for a given step. See [`ToolsPrepareFunc`][pydantic_ai.tools.ToolsPrepareFunc]
+            prepare_output_tools: Custom function to prepare the tool definition of all output tools for each step.
+                This is useful if you want to customize the definition of multiple output tools or you want to register
+                a subset of output tools for a given step. See [`ToolsPrepareFunc`][pydantic_ai.tools.ToolsPrepareFunc]
+            toolsets: Toolsets to register with the agent, including MCP servers.
+            defer_model_check: by default, if you provide a [named][pydantic_ai.models.KnownModelName] model,
+                it's evaluated to create a [`Model`][pydantic_ai.models.Model] instance immediately,
+                which checks for the necessary environment variables. Set this to `false`
+                to defer the evaluation until the first run. Useful if you want to
+                [override the model][pydantic_ai.Agent.override] for testing.
+            end_strategy: Strategy for handling tool calls that are requested alongside a final result.
+                See [`EndStrategy`][pydantic_ai.agent.EndStrategy] for more information.
+            instrument: Set to True to automatically instrument with OpenTelemetry,
+                which will use Logfire if it's configured.
+                Set to an instance of [`InstrumentationSettings`][pydantic_ai.agent.InstrumentationSettings] to customize.
+                If this isn't set, then the last value set by
+                [`Agent.instrument_all()`][pydantic_ai.Agent.instrument_all]
+                will be used, which defaults to False.
+                See the [Debugging and Monitoring guide](https://ai.pydantic.dev/logfire/) for more info.
+            history_processors: Optional list of callables to process the message history before sending it to the model.
+                Each processor takes a list of messages and returns a modified list of messages.
+                Processors can be sync or async and are applied in sequence.
+        """
+        if model is None or defer_model_check:
+            self.model = model
+        else:
+            self.model = models.infer_model(model)
+
+        self.end_strategy = end_strategy
+        self.name = name
+        self.model_settings = model_settings
+
+        if 'result_type' in _deprecated_kwargs:
+            if output_type is not str:  # pragma: no cover
+                raise TypeError('`result_type` and `output_type` cannot be set at the same time.')
+            warnings.warn('`result_type` is deprecated, use `output_type` instead', DeprecationWarning, stacklevel=2)
+            output_type = _deprecated_kwargs.pop('result_type')
+
+        self.output_type = output_type
+
+        self.instrument = instrument
+
+        self._deps_type = deps_type
+
+        self._deprecated_result_tool_name = _deprecated_kwargs.pop('result_tool_name', None)
+        if self._deprecated_result_tool_name is not None:
+            warnings.warn(
+                '`result_tool_name` is deprecated, use `output_type` with `ToolOutput` instead',
+                DeprecationWarning,
+                stacklevel=2,
+            )
+
+        self._deprecated_result_tool_description = _deprecated_kwargs.pop('result_tool_description', None)
+        if self._deprecated_result_tool_description is not None:
+            warnings.warn(
+                '`result_tool_description` is deprecated, use `output_type` with `ToolOutput` instead',
+                DeprecationWarning,
+                stacklevel=2,
+            )
+        result_retries = _deprecated_kwargs.pop('result_retries', None)
+        if result_retries is not None:
+            if output_retries is not None:  # pragma: no cover
+                raise TypeError('`output_retries` and `result_retries` cannot be set at the same time.')
+            warnings.warn(
+                '`result_retries` is deprecated, use `max_result_retries` instead', DeprecationWarning, stacklevel=2
+            )
+            output_retries = result_retries
+
+        if mcp_servers := _deprecated_kwargs.pop('mcp_servers', None):
+            if toolsets is not None:  # pragma: no cover
+                raise TypeError('`mcp_servers` and `toolsets` cannot be set at the same time.')
+            warnings.warn('`mcp_servers` is deprecated, use `toolsets` instead', DeprecationWarning)
+            toolsets = mcp_servers
+
+        _utils.validate_empty_kwargs(_deprecated_kwargs)
+
+        default_output_mode = (
+            self.model.profile.default_structured_output_mode if isinstance(self.model, models.Model) else None
+        )
+
+        self._output_schema = _output.OutputSchema[OutputDataT].build(
+            output_type,
+            default_mode=default_output_mode,
+            name=self._deprecated_result_tool_name,
+            description=self._deprecated_result_tool_description,
+        )
+        self._output_validators = []
+
+        self._instructions = ''
+        self._instructions_functions = []
+        if isinstance(instructions, (str, Callable)):
+            instructions = [instructions]
+        for instruction in instructions or []:
+            if isinstance(instruction, str):
+                self._instructions += instruction + '\n'
+            else:
+                self._instructions_functions.append(_system_prompt.SystemPromptRunner(instruction))
+        self._instructions = self._instructions.strip() or None
+
+        self._system_prompts = (system_prompt,) if isinstance(system_prompt, str) else tuple(system_prompt)
+        self._system_prompt_functions = []
+        self._system_prompt_dynamic_functions = {}
+
+        self._max_result_retries = output_retries if output_retries is not None else retries
+        self._prepare_tools = prepare_tools
+        self._prepare_output_tools = prepare_output_tools
+
+        self._output_toolset = self._output_schema.toolset
+        if self._output_toolset:
+            self._output_toolset.max_retries = self._max_result_retries
+
+        self._function_toolset = FunctionToolset(tools, max_retries=retries)
+        self._user_toolsets = toolsets or ()
+
+        self.history_processors = history_processors or []
+
+        self._override_deps: ContextVar[_utils.Option[AgentDepsT]] = ContextVar('_override_deps', default=None)
+        self._override_model: ContextVar[_utils.Option[models.Model]] = ContextVar('_override_model', default=None)
+        self._override_toolsets: ContextVar[_utils.Option[Sequence[AbstractToolset[AgentDepsT]]]] = ContextVar(
+            '_override_toolsets', default=None
+        )
+
+        self._enter_lock = _utils.get_async_lock()
+        self._entered_count = 0
+        self._exit_stack = None
+
     def __init__(
         self,
         model: models.Model | models.KnownModelName | str | None = None,
         *,
-        result_type: type[OutputDataT] = str,
+        # TODO change this back to `output_type: _output.OutputType[OutputDataT] = str,` when we remove the overloads
+        output_type: Any = str,
         instructions: str
         | _system_prompt.SystemPromptFunc[AgentDepsT]
         | Sequence[str | _system_prompt.SystemPromptFunc[AgentDepsT]]
@@ -244,18 +543,166 @@ class Agent(Generic[AgentDepsT, OutputDataT]):
         name: str | None = None,
         model_settings: ModelSettings | None = None,
         retries: int = 1,
-        result_tool_name: str = _output.DEFAULT_OUTPUT_TOOL_NAME,
-        result_tool_description: str | None = None,
-        result_retries: int | None = None,
+        output_retries: int | None = None,
         tools: Sequence[Tool[AgentDepsT] | ToolFuncEither[AgentDepsT, ...]] = (),
         prepare_tools: ToolsPrepareFunc[AgentDepsT] | None = None,
         prepare_output_tools: ToolsPrepareFunc[AgentDepsT] | None = None,
-        mcp_servers: Sequence[MCPServer] = (),
+        toolsets: Sequence[AbstractToolset[AgentDepsT]] | None = None,
         defer_model_check: bool = False,
         end_strategy: EndStrategy = 'early',
         instrument: InstrumentationSettings | bool | None = None,
         history_processors: Sequence[HistoryProcessor[AgentDepsT]] | None = None,
-    ) -> None: ...
+        **_deprecated_kwargs: Any,
+    ):
+        """Create an agent.
+
+        Args:
+            model: The default model to use for this agent, if not provide,
+                you must provide the model when calling it. We allow `str` here since the actual list of allowed models changes frequently.
+            output_type: The type of the output data, used to validate the data returned by the model,
+                defaults to `str`.
+            instructions: Instructions to use for this agent, you can also register instructions via a function with
+                [`instructions`][pydantic_ai.Agent.instructions].
+            system_prompt: Static system prompts to use for this agent, you can also register system
+                prompts via a function with [`system_prompt`][pydantic_ai.Agent.system_prompt].
+            deps_type: The type used for dependency injection, this parameter exists solely to allow you to fully
+                parameterize the agent, and therefore get the best out of static type checking.
+                If you're not using deps, but want type checking to pass, you can set `deps=None` to satisfy Pyright
+                or add a type hint `: Agent[None, <return type>]`.
+            name: The name of the agent, used for logging. If `None`, we try to infer the agent name from the call frame
+                when the agent is first run.
+            model_settings: Optional model request settings to use for this agent's runs, by default.
+            retries: The default number of retries to allow before raising an error.
+            output_retries: The maximum number of retries to allow for output validation, defaults to `retries`.
+            tools: Tools to register with the agent, you can also register tools via the decorators
+                [`@agent.tool`][pydantic_ai.Agent.tool] and [`@agent.tool_plain`][pydantic_ai.Agent.tool_plain].
+            prepare_tools: Custom function to prepare the tool definition of all tools for each step, except output tools.
+                This is useful if you want to customize the definition of multiple tools or you want to register
+                a subset of tools for a given step. See [`ToolsPrepareFunc`][pydantic_ai.tools.ToolsPrepareFunc]
+            prepare_output_tools: Custom function to prepare the tool definition of all output tools for each step.
+                This is useful if you want to customize the definition of multiple output tools or you want to register
+                a subset of output tools for a given step. See [`ToolsPrepareFunc`][pydantic_ai.tools.ToolsPrepareFunc]
+            toolsets: Toolsets to register with the agent, including MCP servers.
+            defer_model_check: by default, if you provide a [named][pydantic_ai.models.KnownModelName] model,
+                it's evaluated to create a [`Model`][pydantic_ai.models.Model] instance immediately,
+                which checks for the necessary environment variables. Set this to `false`
+                to defer the evaluation until the first run. Useful if you want to
+                [override the model][pydantic_ai.Agent.override] for testing.
+            end_strategy: Strategy for handling tool calls that are requested alongside a final result.
+                See [`EndStrategy`][pydantic_ai.agent.EndStrategy] for more information.
+            instrument: Set to True to automatically instrument with OpenTelemetry,
+                which will use Logfire if it's configured.
+                Set to an instance of [`InstrumentationSettings`][pydantic_ai.agent.InstrumentationSettings] to customize.
+                If this isn't set, then the last value set by
+                [`Agent.instrument_all()`][pydantic_ai.Agent.instrument_all]
+                will be used, which defaults to False.
+                See the [Debugging and Monitoring guide](https://ai.pydantic.dev/logfire/) for more info.
+            history_processors: Optional list of callables to process the message history before sending it to the model.
+                Each processor takes a list of messages and returns a modified list of messages.
+                Processors can be sync or async and are applied in sequence.
+        """
+        if model is None or defer_model_check:
+            self.model = model
+        else:
+            self.model = models.infer_model(model)
+
+        self.end_strategy = end_strategy
+        self.name = name
+        self.model_settings = model_settings
+
+        if 'result_type' in _deprecated_kwargs:
+            if output_type is not str:  # pragma: no cover
+                raise TypeError('`result_type` and `output_type` cannot be set at the same time.')
+            warnings.warn('`result_type` is deprecated, use `output_type` instead', DeprecationWarning, stacklevel=2)
+            output_type = _deprecated_kwargs.pop('result_type')
+
+        self.output_type = output_type
+
+        self.instrument = instrument
+
+        self._deps_type = deps_type
+
+        self._deprecated_result_tool_name = _deprecated_kwargs.pop('result_tool_name', None)
+        if self._deprecated_result_tool_name is not None:
+            warnings.warn(
+                '`result_tool_name` is deprecated, use `output_type` with `ToolOutput` instead',
+                DeprecationWarning,
+                stacklevel=2,
+            )
+
+        self._deprecated_result_tool_description = _deprecated_kwargs.pop('result_tool_description', None)
+        if self._deprecated_result_tool_description is not None:
+            warnings.warn(
+                '`result_tool_description` is deprecated, use `output_type` with `ToolOutput` instead',
+                DeprecationWarning,
+                stacklevel=2,
+            )
+        result_retries = _deprecated_kwargs.pop('result_retries', None)
+        if result_retries is not None:
+            if output_retries is not None:  # pragma: no cover
+                raise TypeError('`output_retries` and `result_retries` cannot be set at the same time.')
+            warnings.warn(
+                '`result_retries` is deprecated, use `max_result_retries` instead', DeprecationWarning, stacklevel=2
+            )
+            output_retries = result_retries
+
+        if mcp_servers := _deprecated_kwargs.pop('mcp_servers', None):
+            if toolsets is not None:  # pragma: no cover
+                raise TypeError('`mcp_servers` and `toolsets` cannot be set at the same time.')
+            warnings.warn('`mcp_servers` is deprecated, use `toolsets` instead', DeprecationWarning)
+            toolsets = mcp_servers
+
+        _utils.validate_empty_kwargs(_deprecated_kwargs)
+
+        default_output_mode = (
+            self.model.profile.default_structured_output_mode if isinstance(self.model, models.Model) else None
+        )
+
+        self._output_schema = _output.OutputSchema[OutputDataT].build(
+            output_type,
+            default_mode=default_output_mode,
+            name=self._deprecated_result_tool_name,
+            description=self._deprecated_result_tool_description,
+        )
+        self._output_validators = []
+
+        self._instructions = ''
+        self._instructions_functions = []
+        if isinstance(instructions, (str, Callable)):
+            instructions = [instructions]
+        for instruction in instructions or []:
+            if isinstance(instruction, str):
+                self._instructions += instruction + '\n'
+            else:
+                self._instructions_functions.append(_system_prompt.SystemPromptRunner(instruction))
+        self._instructions = self._instructions.strip() or None
+
+        self._system_prompts = (system_prompt,) if isinstance(system_prompt, str) else tuple(system_prompt)
+        self._system_prompt_functions = []
+        self._system_prompt_dynamic_functions = {}
+
+        self._max_result_retries = output_retries if output_retries is not None else retries
+        self._prepare_tools = prepare_tools
+        self._prepare_output_tools = prepare_output_tools
+
+        self._output_toolset = self._output_schema.toolset
+        if self._output_toolset:
+            self._output_toolset.max_retries = self._max_result_retries
+
+        self._function_toolset = FunctionToolset(tools, max_retries=retries)
+        self._user_toolsets = toolsets or ()
+
+        self.history_processors = history_processors or []
+
+        self._override_deps: ContextVar[_utils.Option[AgentDepsT]] = ContextVar('_override_deps', default=None)
+        self._override_model: ContextVar[_utils.Option[models.Model]] = ContextVar('_override_model', default=None)
+        self._override_toolsets: ContextVar[_utils.Option[Sequence[AbstractToolset[AgentDepsT]]]] = ContextVar(
+            '_override_toolsets', default=None
+        )
+
+        self._enter_lock = _utils.get_async_lock()
+        self._entered_count = 0
+        self._exit_stack = None
 
     def __init__(
         self,
@@ -1940,6 +2387,8 @@ class Agent(Generic[AgentDepsT, OutputDataT]):
 
         from pydantic_ai._cli import run_chat
 
+        """Type variable for the result data of a run where `output_type` was customized on the run call."""
+
         await run_chat(stream=True, agent=self, deps=deps, console=Console(), code_theme='monokai', prog_name=prog_name)
 
     def to_cli_sync(self: Self, deps: AgentDepsT = None, prog_name: str = 'pydantic-ai') -> None:
@@ -2226,12 +2675,43 @@ class AgentRunResult(Generic[OutputDataT]):
                 return messages
         raise LookupError(f'No tool call found with tool name {self._output_tool_name!r}.')
 
-    @overload
-    def all_messages(self, *, output_tool_return_content: str | None = None) -> list[_messages.ModelMessage]: ...
+    def all_messages(self, *, output_tool_return_content: str | None = None) -> list[_messages.ModelMessage]:
+        """Return the history of _messages.
 
-    @overload
-    @deprecated('`result_tool_return_content` is deprecated, use `output_tool_return_content` instead.')
-    def all_messages(self, *, result_tool_return_content: str | None = None) -> list[_messages.ModelMessage]: ...
+        Args:
+            output_tool_return_content: The return content of the tool call to set in the last message.
+                This provides a convenient way to modify the content of the output tool call if you want to continue
+                the conversation and want to set the response to the output tool call. If `None`, the last message will
+                not be modified.
+            result_tool_return_content: Deprecated, use `output_tool_return_content` instead.
+
+        Returns:
+            List of messages.
+        """
+        content = result.coalesce_deprecated_return_content(output_tool_return_content, result_tool_return_content)
+        # Fast path: nothing to modify
+        if content is None:
+            return self._state.message_history
+        return self._set_output_tool_return(content)
+
+    def all_messages(self, *, result_tool_return_content: str | None = None) -> list[_messages.ModelMessage]:
+        """Return the history of _messages.
+
+        Args:
+            output_tool_return_content: The return content of the tool call to set in the last message.
+                This provides a convenient way to modify the content of the output tool call if you want to continue
+                the conversation and want to set the response to the output tool call. If `None`, the last message will
+                not be modified.
+            result_tool_return_content: Deprecated, use `output_tool_return_content` instead.
+
+        Returns:
+            List of messages.
+        """
+        content = result.coalesce_deprecated_return_content(output_tool_return_content, result_tool_return_content)
+        # Fast path: nothing to modify
+        if content is None:
+            return self._state.message_history
+        return self._set_output_tool_return(content)
 
     def all_messages(
         self, *, output_tool_return_content: str | None = None, result_tool_return_content: str | None = None
@@ -2249,10 +2729,10 @@ class AgentRunResult(Generic[OutputDataT]):
             List of messages.
         """
         content = result.coalesce_deprecated_return_content(output_tool_return_content, result_tool_return_content)
-        if content is not None:
-            return self._set_output_tool_return(content)
-        else:
+        # Fast path: nothing to modify
+        if content is None:
             return self._state.message_history
+        return self._set_output_tool_return(content)
 
     @overload
     def all_messages_json(self, *, output_tool_return_content: str | None = None) -> bytes: ...
