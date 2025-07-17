@@ -46,7 +46,9 @@ class ModelProfile:
         """Update this ModelProfile (subclass) instance with the non-default values from another ModelProfile instance."""
         if not profile:
             return self
-        field_names = set(f.name for f in fields(self))
+        # Fast-path: only operate if profile is not None
+        field_names = {f.name for f in fields(self)}
+        # Only copy attributes from 'profile' that are present in 'self' and are not the default value
         non_default_attrs = {
             f.name: getattr(profile, f.name)
             for f in fields(profile)
