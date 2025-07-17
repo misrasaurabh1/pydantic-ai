@@ -793,7 +793,15 @@ class TextPartDelta:
         """
         if not isinstance(part, TextPart):
             raise ValueError('Cannot apply TextPartDeltas to non-TextParts')  # pragma: no cover
-        return replace(part, content=part.content + self.content_delta)
+
+        # Construct new TextPart instance directly instead of replace for speed
+        # Copy all fields, override 'content'
+        # If TextPart has __slots__, use its signature directly, else fallback to asdict
+
+        # Fast: directly copy fields from part, only update content.
+        kwargs = part.__dict__.copy()
+        kwargs['content'] = part.content + self.content_delta
+        return TextPart(**kwargs)
 
     __repr__ = _utils.dataclasses_no_defaults_repr
 
