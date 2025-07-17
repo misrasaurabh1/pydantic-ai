@@ -35,16 +35,23 @@ class Usage:
         Args:
             incr_usage: The usage to increment by.
         """
-        for f in 'requests', 'request_tokens', 'response_tokens', 'total_tokens':
-            self_value = getattr(self, f)
-            other_value = getattr(incr_usage, f)
-            if self_value is not None or other_value is not None:
-                setattr(self, f, (self_value or 0) + (other_value or 0))
+        # Optimize: direct attribute access; faster than getattr/setattr
+        if self.requests is not None or incr_usage.requests is not None:
+            self.requests = (self.requests or 0) + (incr_usage.requests or 0)
+        if self.request_tokens is not None or incr_usage.request_tokens is not None:
+            self.request_tokens = (self.request_tokens or 0) + (incr_usage.request_tokens or 0)
+        if self.response_tokens is not None or incr_usage.response_tokens is not None:
+            self.response_tokens = (self.response_tokens or 0) + (incr_usage.response_tokens or 0)
+        if self.total_tokens is not None or incr_usage.total_tokens is not None:
+            self.total_tokens = (self.total_tokens or 0) + (incr_usage.total_tokens or 0)
 
+        # details: update faster using dict methods -- avoid repeated lookups
         if incr_usage.details:
-            self.details = self.details or {}
-            for key, value in incr_usage.details.items():
-                self.details[key] = self.details.get(key, 0) + value
+            if self.details is None:
+                self.details = incr_usage.details.copy()
+            else:
+                for key, value in incr_usage.details.items():
+                    self.details[key] = self.details.get(key, 0) + value
 
     def __add__(self, other: Usage) -> Usage:
         """Add two Usages together.
