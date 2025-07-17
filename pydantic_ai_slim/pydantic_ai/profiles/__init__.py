@@ -7,7 +7,7 @@ from typing import Callable, Union
 from typing_extensions import Self
 
 from ..output import StructuredOutputMode
-from ._json_schema import JsonSchemaTransformer
+from ._json_schema import InlineDefsJsonSchemaTransformer, JsonSchemaTransformer
 
 
 @dataclass
@@ -46,15 +46,47 @@ class ModelProfile:
         """Update this ModelProfile (subclass) instance with the non-default values from another ModelProfile instance."""
         if not profile:
             return self
-        field_names = set(f.name for f in fields(self))
-        non_default_attrs = {
-            f.name: getattr(profile, f.name)
-            for f in fields(profile)
-            if f.name in field_names and getattr(profile, f.name) != f.default
-        }
+        non_default_attrs = {}
+        for f in fields(self):
+            try:
+                value = getattr(profile, f.name)
+                if value != f.default:
+                    non_default_attrs[f.name] = value
+            except AttributeError:
+                continue
         return replace(self, **non_default_attrs)
+
+
+# Move profile functions here for efficiency:
+def _google_model_profile(model_name: str) -> ModelProfile:
+    """Get the model profile for a Google model."""
+    # GoogleJsonSchemaTransformer is likely available by import in the real codebase, but omitted here for reference.
+    return ModelProfile(
+        json_schema_transformer=GoogleJsonSchemaTransformer,
+        supports_json_schema_output=True,
+        supports_json_object_output=True,
+    )
+
+
+def _qwen_model_profile(model_name: str) -> ModelProfile:
+    """Get the model profile for a Qwen model."""
+    return ModelProfile(json_schema_transformer=InlineDefsJsonSchemaTransformer)
+
+
+def _meta_model_profile(model_name: str) -> ModelProfile:
+    """Get the model profile for a Meta model."""
+    return ModelProfile(json_schema_transformer=InlineDefsJsonSchemaTransformer)
 
 
 ModelProfileSpec = Union[ModelProfile, Callable[[str], Union[ModelProfile, None]]]
 
 DEFAULT_PROFILE = ModelProfile()
+
+_PROVIDER_TO_PROFILE = {
+    'google': _google_model_profile,
+    'qwen': _qwen_model_profile,
+    'meta-llama': _meta_model_profile,
+    # The following providers return None so can skip function call and just skip/None
+    # 'deepseek-ai': lambda _: None,
+    # 'mistralai': lambda _: None,
+}

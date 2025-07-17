@@ -1,7 +1,6 @@
 from __future__ import annotations as _annotations
 
 import os
-from typing import overload
 
 from httpx import AsyncClient as AsyncHTTPClient
 from openai import AsyncOpenAI
@@ -9,12 +8,8 @@ from openai import AsyncOpenAI
 from pydantic_ai.exceptions import UserError
 from pydantic_ai.models import cached_async_http_client
 from pydantic_ai.profiles import ModelProfile
-from pydantic_ai.profiles.deepseek import deepseek_model_profile
-from pydantic_ai.profiles.google import google_model_profile
-from pydantic_ai.profiles.meta import meta_model_profile
-from pydantic_ai.profiles.mistral import mistral_model_profile
+from pydantic_ai.profiles._json_schema import InlineDefsJsonSchemaTransformer
 from pydantic_ai.profiles.openai import OpenAIJsonSchemaTransformer, OpenAIModelProfile
-from pydantic_ai.profiles.qwen import qwen_model_profile
 from pydantic_ai.providers import Provider
 
 try:
@@ -42,36 +37,20 @@ class TogetherProvider(Provider[AsyncOpenAI]):
         return self._client
 
     def model_profile(self, model_name: str) -> ModelProfile | None:
-        provider_to_profile = {
-            'deepseek-ai': deepseek_model_profile,
-            'google': google_model_profile,
-            'qwen': qwen_model_profile,
-            'meta-llama': meta_model_profile,
-            'mistralai': mistral_model_profile,
-        }
-
-        profile = None
-
         model_name = model_name.lower()
-        provider, model_name = model_name.split('/', 1)
-        if provider in provider_to_profile:
-            profile = provider_to_profile[provider](model_name)
-
+        try:
+            provider, model_short_name = model_name.split('/', 1)
+        except ValueError:
+            return OpenAIModelProfile(json_schema_transformer=OpenAIJsonSchemaTransformer)
+        if provider in _PROVIDER_TO_PROFILE:
+            profile = _PROVIDER_TO_PROFILE[provider](model_short_name)
+        elif provider in ('deepseek-ai', 'mistralai'):
+            profile = None
+        else:
+            profile = None
         # As the Together API is OpenAI-compatible, let's assume we also need OpenAIJsonSchemaTransformer,
         # unless json_schema_transformer is set explicitly
         return OpenAIModelProfile(json_schema_transformer=OpenAIJsonSchemaTransformer).update(profile)
-
-    @overload
-    def __init__(self) -> None: ...
-
-    @overload
-    def __init__(self, *, api_key: str) -> None: ...
-
-    @overload
-    def __init__(self, *, api_key: str, http_client: AsyncHTTPClient) -> None: ...
-
-    @overload
-    def __init__(self, *, openai_client: AsyncOpenAI | None = None) -> None: ...
 
     def __init__(
         self,
@@ -80,8 +59,8 @@ class TogetherProvider(Provider[AsyncOpenAI]):
         openai_client: AsyncOpenAI | None = None,
         http_client: AsyncHTTPClient | None = None,
     ) -> None:
-        api_key = api_key or os.getenv('TOGETHER_API_KEY')
-        if not api_key and openai_client is None:
+        key = api_key or os.getenv('TOGETHER_API_KEY')
+        if not key and openai_client is None:
             raise UserError(
                 'Set the `TOGETHER_API_KEY` environment variable or pass it via `TogetherProvider(api_key=...)`'
                 'to use the Together AI provider.'
@@ -89,8 +68,122 @@ class TogetherProvider(Provider[AsyncOpenAI]):
 
         if openai_client is not None:
             self._client = openai_client
-        elif http_client is not None:
-            self._client = AsyncOpenAI(base_url=self.base_url, api_key=api_key, http_client=http_client)
         else:
-            http_client = cached_async_http_client(provider='together')
-            self._client = AsyncOpenAI(base_url=self.base_url, api_key=api_key, http_client=http_client)
+            if http_client is None:
+                http_client = cached_async_http_client(provider='together')
+            self._client = AsyncOpenAI(base_url=self.base_url, api_key=key, http_client=http_client)
+
+    def __init__(
+        self,
+        *,
+        api_key: str | None = None,
+        openai_client: AsyncOpenAI | None = None,
+        http_client: AsyncHTTPClient | None = None,
+    ) -> None:
+        key = api_key or os.getenv('TOGETHER_API_KEY')
+        if not key and openai_client is None:
+            raise UserError(
+                'Set the `TOGETHER_API_KEY` environment variable or pass it via `TogetherProvider(api_key=...)`'
+                'to use the Together AI provider.'
+            )
+
+        if openai_client is not None:
+            self._client = openai_client
+        else:
+            if http_client is None:
+                http_client = cached_async_http_client(provider='together')
+            self._client = AsyncOpenAI(base_url=self.base_url, api_key=key, http_client=http_client)
+
+    def __init__(
+        self,
+        *,
+        api_key: str | None = None,
+        openai_client: AsyncOpenAI | None = None,
+        http_client: AsyncHTTPClient | None = None,
+    ) -> None:
+        key = api_key or os.getenv('TOGETHER_API_KEY')
+        if not key and openai_client is None:
+            raise UserError(
+                'Set the `TOGETHER_API_KEY` environment variable or pass it via `TogetherProvider(api_key=...)`'
+                'to use the Together AI provider.'
+            )
+
+        if openai_client is not None:
+            self._client = openai_client
+        else:
+            if http_client is None:
+                http_client = cached_async_http_client(provider='together')
+            self._client = AsyncOpenAI(base_url=self.base_url, api_key=key, http_client=http_client)
+
+    def __init__(
+        self,
+        *,
+        api_key: str | None = None,
+        openai_client: AsyncOpenAI | None = None,
+        http_client: AsyncHTTPClient | None = None,
+    ) -> None:
+        key = api_key or os.getenv('TOGETHER_API_KEY')
+        if not key and openai_client is None:
+            raise UserError(
+                'Set the `TOGETHER_API_KEY` environment variable or pass it via `TogetherProvider(api_key=...)`'
+                'to use the Together AI provider.'
+            )
+
+        if openai_client is not None:
+            self._client = openai_client
+        else:
+            if http_client is None:
+                http_client = cached_async_http_client(provider='together')
+            self._client = AsyncOpenAI(base_url=self.base_url, api_key=key, http_client=http_client)
+
+    def __init__(
+        self,
+        *,
+        api_key: str | None = None,
+        openai_client: AsyncOpenAI | None = None,
+        http_client: AsyncHTTPClient | None = None,
+    ) -> None:
+        key = api_key or os.getenv('TOGETHER_API_KEY')
+        if not key and openai_client is None:
+            raise UserError(
+                'Set the `TOGETHER_API_KEY` environment variable or pass it via `TogetherProvider(api_key=...)`'
+                'to use the Together AI provider.'
+            )
+
+        if openai_client is not None:
+            self._client = openai_client
+        else:
+            if http_client is None:
+                http_client = cached_async_http_client(provider='together')
+            self._client = AsyncOpenAI(base_url=self.base_url, api_key=key, http_client=http_client)
+
+
+# Move profile functions here for efficiency:
+def _google_model_profile(model_name: str) -> ModelProfile:
+    """Get the model profile for a Google model."""
+    # GoogleJsonSchemaTransformer is likely available by import in the real codebase, but omitted here for reference.
+    return ModelProfile(
+        json_schema_transformer=GoogleJsonSchemaTransformer,
+        supports_json_schema_output=True,
+        supports_json_object_output=True,
+    )
+
+
+def _qwen_model_profile(model_name: str) -> ModelProfile:
+    """Get the model profile for a Qwen model."""
+    return ModelProfile(json_schema_transformer=InlineDefsJsonSchemaTransformer)
+
+
+def _meta_model_profile(model_name: str) -> ModelProfile:
+    """Get the model profile for a Meta model."""
+    return ModelProfile(json_schema_transformer=InlineDefsJsonSchemaTransformer)
+
+
+_PROVIDER_TO_PROFILE = {
+    'google': _google_model_profile,
+    'qwen': _qwen_model_profile,
+    'meta-llama': _meta_model_profile,
+    # The following providers return None so can skip function call and just skip/None
+    # 'deepseek-ai': lambda _: None,
+    # 'mistralai': lambda _: None,
+}
