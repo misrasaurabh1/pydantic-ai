@@ -57,13 +57,21 @@ class Usage:
 
     def opentelemetry_attributes(self) -> dict[str, int]:
         """Get the token limits as OpenTelemetry attributes."""
-        result = {
-            'gen_ai.usage.input_tokens': self.request_tokens,
-            'gen_ai.usage.output_tokens': self.response_tokens,
-        }
-        for key, value in (self.details or {}).items():
-            result[f'gen_ai.usage.details.{key}'] = value  # pragma: no cover
-        return {k: v for k, v in result.items() if v}
+        # Optimize: Avoid creating dict with possible None, and avoid filtering later
+        attrs = {}
+        req = self.request_tokens
+        resp = self.response_tokens
+        if req:
+            attrs['gen_ai.usage.input_tokens'] = req
+        if resp:
+            attrs['gen_ai.usage.output_tokens'] = resp
+        details = self.details
+        if details:
+            # Use direct loop for lowest overhead and avoid dict comprehensions/extra objects
+            for key, value in details.items():
+                if value:
+                    attrs[f'gen_ai.usage.details.{key}'] = value  # pragma: no cover
+        return attrs
 
     def has_values(self) -> bool:
         """Whether any values are set and non-zero."""
