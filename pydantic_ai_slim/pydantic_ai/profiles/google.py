@@ -17,6 +17,23 @@ def google_model_profile(model_name: str) -> ModelProfile | None:
     )
 
 
+def _deduplicate_items(items_list):
+    """Deduplicate preserving order, using tuple-repr as keys for hashability."""
+    seen = set()
+    unique = []
+    for item in items_list:
+        # The tuple(sorted(item.items())) trick works for dicts with hashable items,
+        # if not, fallback to id for worst-case but rare scenario in schemas.
+        try:
+            marker = tuple(sorted(item.items()))
+        except Exception:
+            marker = id(item)
+        if marker not in seen:
+            seen.add(marker)
+            unique.append(item)
+    return unique
+
+
 class GoogleJsonSchemaTransformer(JsonSchemaTransformer):
     """Transforms the JSON Schema from Pydantic to be suitable for Gemini.
 
@@ -66,6 +83,7 @@ class GoogleJsonSchemaTransformer(JsonSchemaTransformer):
         # Pydantic will take care of transforming the transformed string values to the correct type.
         if enum := schema.get('enum'):
             schema['type'] = 'string'
+            # This is not a hotspot, so keep as is for clarity.
             schema['enum'] = [str(val) for val in enum]
 
         type_ = schema.get('type')
@@ -89,10 +107,12 @@ class GoogleJsonSchemaTransformer(JsonSchemaTransformer):
             # prefixItems is not currently supported in Gemini, so we convert it to items for best compatibility
             prefix_items = schema.pop('prefixItems')
             items = schema.get('items')
-            unique_items = [items] if items is not None else []
-            for item in prefix_items:
-                if item not in unique_items:
-                    unique_items.append(item)
+            # Optimize: O(N²) -> O(N) using _deduplicate_items helper
+            if items is not None:
+                unique_items = [items] + prefix_items
+            else:
+                unique_items = prefix_items
+            unique_items = _deduplicate_items(unique_items) if len(unique_items) > 1 else unique_items
             if len(unique_items) > 1:  # pragma: no cover
                 schema['items'] = {'anyOf': unique_items}
             elif len(unique_items) == 1:  # pragma: no branch
