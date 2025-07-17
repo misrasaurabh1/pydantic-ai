@@ -2,7 +2,6 @@ from __future__ import annotations as _annotations
 
 import re
 from dataclasses import dataclass
-from typing import Any
 
 from . import ModelProfile
 from ._json_schema import JsonSchema, JsonSchemaTransformer
@@ -90,75 +89,82 @@ class OpenAIJsonSchemaTransformer(JsonSchemaTransformer):
 
         return result
 
-    def transform(self, schema: JsonSchema) -> JsonSchema:  # noqa C901
-        # Remove unnecessary keys
-        schema.pop('title', None)
-        schema.pop('$schema', None)
-        schema.pop('discriminator', None)
+    def transform(self, schema: JsonSchema) -> JsonSchema:
+        # Remove known irrelevant keys quickly
+        for k in ('title', '$schema', 'discriminator'):
+            schema.pop(k, None)
 
+        # Handle "default" key smartly
         default = schema.get('default', _sentinel)
         if default is not _sentinel:
-            # the "default" keyword is not allowed in strict mode, but including it makes some Ollama models behave
-            # better, so we keep it around when not strict
             if self.strict is True:
                 schema.pop('default', None)
             elif self.strict is None:  # pragma: no branch
                 self.is_strict_compatible = False
 
-        if schema_ref := schema.get('$ref'):
+        # Optimize $ref transformation
+        schema_ref = schema.get('$ref')
+        if schema_ref is not None:
             if schema_ref == self.root_ref:
                 schema['$ref'] = '#'
             if len(schema) > 1:
-                # OpenAI Strict mode doesn't support siblings to "$ref", but _does_ allow siblings to "anyOf".
-                # So if there is a "description" field or any other extra info, we move the "$ref" into an "anyOf":
+                # Move $ref to anyOf as needed
                 schema['anyOf'] = [{'$ref': schema.pop('$ref')}]
 
-        # Track strict-incompatible keys
-        incompatible_values: dict[str, Any] = {}
-        for key in _STRICT_INCOMPATIBLE_KEYS:
-            value = schema.get(key, _sentinel)
-            if value is not _sentinel:
-                incompatible_values[key] = value
-        description = schema.get('description')
+        # Bulk collect incompatible keys in a single pass
+        present_keys = _STRICT_INCOMPATIBLE_KEYS_SET & schema.keys()
+        if present_keys:
+            incompatible_values = {k: schema[k] for k in present_keys}
+        else:
+            incompatible_values = {}
+
+        # Handle incompatible keys
         if incompatible_values:
+            description = schema.get('description')
             if self.strict is True:
-                notes: list[str] = []
-                for key, value in incompatible_values.items():
-                    schema.pop(key)
-                    notes.append(f'{key}={value}')
+                notes = [f'{key}={value}' for key, value in incompatible_values.items()]
+                for key in incompatible_values:
+                    schema.pop(key, None)
                 notes_string = ', '.join(notes)
-                schema['description'] = notes_string if not description else f'{description} ({notes_string})'
+                # Faster description update
+                if description:
+                    schema['description'] = f'{description} ({notes_string})'
+                else:
+                    schema['description'] = notes_string
             elif self.strict is None:  # pragma: no branch
                 self.is_strict_compatible = False
 
-        schema_type = schema.get('type')
+        # Optimize openai/strict mode for oneOf
         if 'oneOf' in schema:
-            # OpenAI does not support oneOf in strict mode
             if self.strict is True:
                 schema['anyOf'] = schema.pop('oneOf')
             else:
                 self.is_strict_compatible = False
 
+        schema_type = schema.get('type')
         if schema_type == 'object':
             if self.strict is True:
-                # additional properties are disallowed
+                # additionalProperties are disallowed
                 schema['additionalProperties'] = False
-
                 # all properties are required
                 if 'properties' not in schema:
-                    schema['properties'] = dict[str, Any]()
+                    schema['properties'] = {}
                 schema['required'] = list(schema['properties'].keys())
-
             elif self.strict is None:
-                if (
-                    schema.get('additionalProperties') is not False
-                    or 'properties' not in schema
-                    or 'required' not in schema
-                ):
+                # Avoid multiple lookups
+                additional_props = schema.get('additionalProperties')
+                properties = schema.get('properties')
+                required = schema.get('required')
+                if additional_props is not False or properties is None or required is None:
                     self.is_strict_compatible = False
                 else:
-                    required = schema['required']
-                    for k in schema['properties'].keys():
-                        if k not in required:
+                    # Only check missing keys quickly
+                    required_set = set(required)
+                    for k in properties:
+                        if k not in required_set:
                             self.is_strict_compatible = False
+                            break
         return schema
+
+
+_STRICT_INCOMPATIBLE_KEYS_SET = set(_STRICT_INCOMPATIBLE_KEYS)
