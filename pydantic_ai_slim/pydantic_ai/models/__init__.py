@@ -423,38 +423,33 @@ class Model(ABC):
         we want to use the instructions from the second-to-most-recent request (which should correspond to the
         original request that generated the response that resulted in the tool-return part).
         """
-        last_two_requests: list[ModelRequest] = []
-        for message in reversed(messages):
-            if isinstance(message, ModelRequest):
-                last_two_requests.append(message)
-                if len(last_two_requests) == 2:
-                    break
-                if message.instructions is not None:
-                    return message.instructions
+        # Keep references to the two most recent ModelRequests as we scan--no lists!
+        most_recent: ModelRequest | None = None
+        second_most_recent: ModelRequest | None = None
 
-        # If we don't have two requests, and we didn't already return instructions, there are definitely not any:
-        if len(last_two_requests) != 2:
+        for message in reversed(messages):
+            if not isinstance(message, ModelRequest):
+                continue
+
+            if message.instructions is not None:
+                # Fast path: return immediately if instructions found
+                return message.instructions
+
+            # Move to 'most recent' slotting
+            second_most_recent = most_recent
+            most_recent = message
+
+            if second_most_recent is not None:
+                # Found two ModelRequests; stop scanning
+                break
+
+        if most_recent is None or second_most_recent is None:
             return None
 
-        most_recent_request = last_two_requests[0]
-        second_most_recent_request = last_two_requests[1]
-
-        # If we've gotten this far and the most recent request consists of only tool-return parts or retry-prompt parts,
-        # we use the instructions from the second-to-most-recent request. This is necessary because when handling
-        # result tools, we generate a "mock" ModelRequest with a tool-return part for it, and that ModelRequest will not
-        # have the relevant instructions from the agent.
-
-        # While it's possible that you could have a message history where the most recent request has only tool returns,
-        # I believe there is no way to achieve that would _change_ the instructions without manually crafting the most
-        # recent message. That might make sense in principle for some usage pattern, but it's enough of an edge case
-        # that I think it's not worth worrying about, since you can work around this by inserting another ModelRequest
-        # with no parts at all immediately before the request that has the tool calls (that works because we only look
-        # at the two most recent ModelRequests here).
-
-        # If you have a use case where this causes pain, please open a GitHub issue and we can discuss alternatives.
-
-        if all(p.part_kind == 'tool-return' or p.part_kind == 'retry-prompt' for p in most_recent_request.parts):
-            return second_most_recent_request.instructions
+        # Check if all parts in the most recent request are tool-return or retry-prompt
+        mr_parts = most_recent.parts
+        if all(p.part_kind == 'tool-return' or p.part_kind == 'retry-prompt' for p in mr_parts):
+            return second_most_recent.instructions
 
         return None
 
