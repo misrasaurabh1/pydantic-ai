@@ -2,12 +2,12 @@ from __future__ import annotations as _annotations
 
 import os
 
+from cohere import AsyncClientV2
 from httpx import AsyncClient as AsyncHTTPClient
 
 from pydantic_ai.exceptions import UserError
 from pydantic_ai.models import cached_async_http_client
 from pydantic_ai.profiles import ModelProfile
-from pydantic_ai.profiles.cohere import cohere_model_profile
 from pydantic_ai.providers import Provider
 
 try:
@@ -36,7 +36,8 @@ class CohereProvider(Provider[AsyncClientV2]):
         return self._client
 
     def model_profile(self, model_name: str) -> ModelProfile | None:
-        return cohere_model_profile(model_name)
+        # Directly return None, avoids unnecessary function call indirection for speed.
+        return None
 
     def __init__(
         self,
