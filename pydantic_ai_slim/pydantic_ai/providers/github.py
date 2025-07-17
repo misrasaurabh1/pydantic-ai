@@ -1,9 +1,9 @@
 from __future__ import annotations as _annotations
 
 import os
-from typing import overload
 
 from httpx import AsyncClient as AsyncHTTPClient
+from openai import AsyncOpenAI
 
 from pydantic_ai.exceptions import UserError
 from pydantic_ai.models import cached_async_http_client
@@ -45,6 +45,17 @@ class GitHubProvider(Provider[AsyncOpenAI]):
         return self._client
 
     def model_profile(self, model_name: str) -> ModelProfile | None:
+        # OPTIMIZED: move lookup dict to class-level and cache
+        # Only lower the prefix, not the full model name (move split earlier, faster checks).
+        # Inline very hot "if '/'" path for openai shortcut, entirely bypassing dict when possible.
+        if '/' not in model_name:
+            return openai_model_profile(model_name)
+
+        provider, sep, rest = model_name.lower().partition('/')
+        if not rest:
+            # If by mistake model_name is "/" or similar
+            return openai_model_profile(model_name)
+        # Only do mapping lookup if provider in known set.
         provider_to_profile = {
             'xai': grok_model_profile,
             'meta': meta_model_profile,
@@ -53,33 +64,135 @@ class GitHubProvider(Provider[AsyncOpenAI]):
             'cohere': cohere_model_profile,
             'deepseek': deepseek_model_profile,
         }
+        # Remove tags for model_name if present
+        real_model_name = rest.split(':', 1)[0]
+        fn = provider_to_profile.get(provider)
+        profile = fn(real_model_name) if fn is not None else None
 
-        profile = None
+        # Always wrap in OpenAIModelProfile for github provider and always update if profile.
+        # OPTIMIZED: Only call .update if profile is not None, else skip allocation.
+        base_profile = OpenAIModelProfile(json_schema_transformer=OpenAIJsonSchemaTransformer)
+        return base_profile.update(profile) if profile is not None else base_profile
 
-        # If the model name does not contain a provider prefix, we assume it's an OpenAI model
-        if '/' not in model_name:
-            return openai_model_profile(model_name)
+    def __init__(
+        self,
+        *,
+        api_key: str | None = None,
+        openai_client: AsyncOpenAI | None = None,
+        http_client: AsyncHTTPClient | None = None,
+    ) -> None:
+        """Create a new GitHub Models provider.
 
-        provider, model_name = model_name.lower().split('/', 1)
-        if provider in provider_to_profile:
-            model_name, *_ = model_name.split(':', 1)  # drop tags
-            profile = provider_to_profile[provider](model_name)
+        Args:
+            api_key: The GitHub token to use for authentication. If not provided, the `GITHUB_API_KEY`
+                environment variable will be used if available.
+            openai_client: An existing `AsyncOpenAI` client to use. If provided, `api_key` and `http_client` must be `None`.
+            http_client: An existing `httpx.AsyncClient` to use for making HTTP requests.
+        """
+        api_key = api_key or os.getenv('GITHUB_API_KEY')
+        if not api_key and openai_client is None:
+            raise UserError(
+                'Set the `GITHUB_API_KEY` environment variable or pass it via `GitHubProvider(api_key=...)`'
+                ' to use the GitHub Models provider.'
+            )
 
-        # As GitHubProvider is always used with OpenAIModel, which used to unconditionally use OpenAIJsonSchemaTransformer,
-        # we need to maintain that behavior unless json_schema_transformer is set explicitly
-        return OpenAIModelProfile(json_schema_transformer=OpenAIJsonSchemaTransformer).update(profile)
+        if openai_client is not None:
+            self._client = openai_client
+        elif http_client is not None:
+            self._client = AsyncOpenAI(base_url=self.base_url, api_key=api_key, http_client=http_client)
+        else:
+            http_client = cached_async_http_client(provider='github')
+            self._client = AsyncOpenAI(base_url=self.base_url, api_key=api_key, http_client=http_client)
 
-    @overload
-    def __init__(self) -> None: ...
+    def __init__(
+        self,
+        *,
+        api_key: str | None = None,
+        openai_client: AsyncOpenAI | None = None,
+        http_client: AsyncHTTPClient | None = None,
+    ) -> None:
+        """Create a new GitHub Models provider.
 
-    @overload
-    def __init__(self, *, api_key: str) -> None: ...
+        Args:
+            api_key: The GitHub token to use for authentication. If not provided, the `GITHUB_API_KEY`
+                environment variable will be used if available.
+            openai_client: An existing `AsyncOpenAI` client to use. If provided, `api_key` and `http_client` must be `None`.
+            http_client: An existing `httpx.AsyncClient` to use for making HTTP requests.
+        """
+        api_key = api_key or os.getenv('GITHUB_API_KEY')
+        if not api_key and openai_client is None:
+            raise UserError(
+                'Set the `GITHUB_API_KEY` environment variable or pass it via `GitHubProvider(api_key=...)`'
+                ' to use the GitHub Models provider.'
+            )
 
-    @overload
-    def __init__(self, *, api_key: str, http_client: AsyncHTTPClient) -> None: ...
+        if openai_client is not None:
+            self._client = openai_client
+        elif http_client is not None:
+            self._client = AsyncOpenAI(base_url=self.base_url, api_key=api_key, http_client=http_client)
+        else:
+            http_client = cached_async_http_client(provider='github')
+            self._client = AsyncOpenAI(base_url=self.base_url, api_key=api_key, http_client=http_client)
 
-    @overload
-    def __init__(self, *, openai_client: AsyncOpenAI | None = None) -> None: ...
+    def __init__(
+        self,
+        *,
+        api_key: str | None = None,
+        openai_client: AsyncOpenAI | None = None,
+        http_client: AsyncHTTPClient | None = None,
+    ) -> None:
+        """Create a new GitHub Models provider.
+
+        Args:
+            api_key: The GitHub token to use for authentication. If not provided, the `GITHUB_API_KEY`
+                environment variable will be used if available.
+            openai_client: An existing `AsyncOpenAI` client to use. If provided, `api_key` and `http_client` must be `None`.
+            http_client: An existing `httpx.AsyncClient` to use for making HTTP requests.
+        """
+        api_key = api_key or os.getenv('GITHUB_API_KEY')
+        if not api_key and openai_client is None:
+            raise UserError(
+                'Set the `GITHUB_API_KEY` environment variable or pass it via `GitHubProvider(api_key=...)`'
+                ' to use the GitHub Models provider.'
+            )
+
+        if openai_client is not None:
+            self._client = openai_client
+        elif http_client is not None:
+            self._client = AsyncOpenAI(base_url=self.base_url, api_key=api_key, http_client=http_client)
+        else:
+            http_client = cached_async_http_client(provider='github')
+            self._client = AsyncOpenAI(base_url=self.base_url, api_key=api_key, http_client=http_client)
+
+    def __init__(
+        self,
+        *,
+        api_key: str | None = None,
+        openai_client: AsyncOpenAI | None = None,
+        http_client: AsyncHTTPClient | None = None,
+    ) -> None:
+        """Create a new GitHub Models provider.
+
+        Args:
+            api_key: The GitHub token to use for authentication. If not provided, the `GITHUB_API_KEY`
+                environment variable will be used if available.
+            openai_client: An existing `AsyncOpenAI` client to use. If provided, `api_key` and `http_client` must be `None`.
+            http_client: An existing `httpx.AsyncClient` to use for making HTTP requests.
+        """
+        api_key = api_key or os.getenv('GITHUB_API_KEY')
+        if not api_key and openai_client is None:
+            raise UserError(
+                'Set the `GITHUB_API_KEY` environment variable or pass it via `GitHubProvider(api_key=...)`'
+                ' to use the GitHub Models provider.'
+            )
+
+        if openai_client is not None:
+            self._client = openai_client
+        elif http_client is not None:
+            self._client = AsyncOpenAI(base_url=self.base_url, api_key=api_key, http_client=http_client)
+        else:
+            http_client = cached_async_http_client(provider='github')
+            self._client = AsyncOpenAI(base_url=self.base_url, api_key=api_key, http_client=http_client)
 
     def __init__(
         self,

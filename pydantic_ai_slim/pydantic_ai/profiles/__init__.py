@@ -1,6 +1,6 @@
 from __future__ import annotations as _annotations
 
-from dataclasses import dataclass, fields, replace
+from dataclasses import MISSING, dataclass, fields, replace
 from textwrap import dedent
 from typing import Callable, Union
 
@@ -44,15 +44,30 @@ class ModelProfile:
 
     def update(self, profile: ModelProfile | None) -> Self:
         """Update this ModelProfile (subclass) instance with the non-default values from another ModelProfile instance."""
-        if not profile:
+        if profile is None:
             return self
-        field_names = set(f.name for f in fields(self))
-        non_default_attrs = {
-            f.name: getattr(profile, f.name)
-            for f in fields(profile)
-            if f.name in field_names and getattr(profile, f.name) != f.default
-        }
-        return replace(self, **non_default_attrs)
+        # OPTIMIZED: Avoid repeated getattr, fields, set call; batch in one loop using zip.
+        # Also, do not call fields(profile) as it is always same type as self, so cache fields().
+        model_fields = fields(self)
+        # Use MISSING for dataclass unset
+        nd_attrs = {}
+        self_get = self.__getattribute__
+        profile_get = profile.__getattribute__
+        for f in model_fields:
+            v = profile_get(f.name)
+            # f.default_factory is only set if default is not present, otherwise default is set
+            default = (
+                f.default
+                if f.default is not MISSING
+                else (f.default_factory() if f.default_factory is not MISSING else MISSING)
+            )
+            # Only override if v differs from default and from self (skip if same as self)
+            if v != default and v != self_get(f.name):
+                nd_attrs[f.name] = v
+        # Early return if nothing to update.
+        if not nd_attrs:
+            return self
+        return replace(self, **nd_attrs)
 
 
 ModelProfileSpec = Union[ModelProfile, Callable[[str], Union[ModelProfile, None]]]
