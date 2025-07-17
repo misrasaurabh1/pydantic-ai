@@ -30,6 +30,8 @@ from .output import (
 )
 from .usage import Usage, UsageLimits
 
+"""An invariant TypeVar."""
+
 __all__ = (
     'OutputDataT',
     'OutputDataT_inv',
