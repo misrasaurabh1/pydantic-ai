@@ -44,14 +44,32 @@ class ModelProfile:
 
     def update(self, profile: ModelProfile | None) -> Self:
         """Update this ModelProfile (subclass) instance with the non-default values from another ModelProfile instance."""
-        if not profile:
+        if not profile or self is profile:
             return self
-        field_names = set(f.name for f in fields(self))
-        non_default_attrs = {
-            f.name: getattr(profile, f.name)
-            for f in fields(profile)
-            if f.name in field_names and getattr(profile, f.name) != f.default
-        }
+
+        # Use a class-level cache for ModelProfile defaults
+        cls = type(self)
+        try:
+            _model_fields = cls._modelprofile_fields
+            _model_defaults = cls._modelprofile_defaults
+        except AttributeError:
+            _model_fields = tuple(fields(cls))
+            _model_defaults = {f.name: f.default for f in _model_fields}
+            cls._modelprofile_fields = _model_fields
+            cls._modelprofile_defaults = _model_defaults
+
+        # Build only what is needed and avoid unnecessary getattr
+        non_default_attrs = {}
+        for f in _model_fields:
+            fname = f.name
+            val = getattr(profile, fname, _model_defaults[fname])
+            if fname != 'default_structured_output_mode' and val == _model_defaults[fname]:
+                continue
+            if getattr(self, fname) != val:
+                non_default_attrs[fname] = val
+
+        if not non_default_attrs:
+            return self
         return replace(self, **non_default_attrs)
 
 
