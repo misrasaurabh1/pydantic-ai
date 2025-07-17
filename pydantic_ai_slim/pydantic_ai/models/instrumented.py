@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import json
-from collections.abc import AsyncIterator, Iterator, Mapping
+from collections.abc import AsyncIterator, Iterator
 from contextlib import asynccontextmanager, contextmanager
 from dataclasses import dataclass, field
 from typing import Any, Callable, Literal
@@ -198,7 +198,7 @@ class InstrumentedModel(WrapperModel):
         options: InstrumentationSettings | None = None,
     ) -> None:
         super().__init__(wrapped)
-        self.instrumentation_settings = options or InstrumentationSettings()
+        self.instrumentation_settings = options if options is not None else InstrumentationSettings()
 
     async def request(
         self,
@@ -369,13 +369,21 @@ class InstrumentedModel(WrapperModel):
 
     @staticmethod
     def event_to_dict(event: Event) -> dict[str, Any]:
-        if not event.body:
-            body = {}  # pragma: no cover
-        elif isinstance(event.body, Mapping):
-            body = event.body  # type: ignore
+        body = event.body
+        if body is None:
+            out = {}
+        elif isinstance(body, dict):
+            out = body
         else:
-            body = {'body': event.body}
-        return {**body, **(event.attributes or {})}
+            out = {'body': body}
+        attrs = event.attributes
+        if not out and not attrs:
+            return {}
+        # Prefer update of smaller dict for perf. But typical OpenTelemetry, `attributes` are very often a dict, so merge anyway.
+        if attrs:
+            return {**out, **attrs}
+        else:
+            return dict(out)
 
     @staticmethod
     def serialize_any(value: Any) -> str:
