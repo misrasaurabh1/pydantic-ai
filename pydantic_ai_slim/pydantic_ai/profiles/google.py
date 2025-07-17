@@ -10,11 +10,14 @@ from ._json_schema import JsonSchema, JsonSchemaTransformer
 
 def google_model_profile(model_name: str) -> ModelProfile | None:
     """Get the model profile for a Google model."""
-    return ModelProfile(
-        json_schema_transformer=GoogleJsonSchemaTransformer,
-        supports_json_schema_output=True,
-        supports_json_object_output=True,
-    )
+    # Use a function attribute for local caching, faster than global or lru_cache in this trivial case.
+    if not hasattr(google_model_profile, '_profile'):
+        google_model_profile._profile = ModelProfile(
+            json_schema_transformer=GoogleJsonSchemaTransformer,
+            supports_json_schema_output=True,
+            supports_json_object_output=True,
+        )
+    return google_model_profile._profile
 
 
 class GoogleJsonSchemaTransformer(JsonSchemaTransformer):
