@@ -1,7 +1,6 @@
 from __future__ import annotations as _annotations
 
 import os
-from typing import overload
 
 from httpx import AsyncClient as AsyncHTTPClient
 from openai import AsyncOpenAI
@@ -42,6 +41,7 @@ class FireworksProvider(Provider[AsyncOpenAI]):
         return self._client
 
     def model_profile(self, model_name: str) -> ModelProfile | None:
+        # Optimized: use local reference instead of in-loop item lookup
         prefix_to_profile = {
             'llama': meta_model_profile,
             'qwen': qwen_model_profile,
@@ -51,30 +51,105 @@ class FireworksProvider(Provider[AsyncOpenAI]):
         }
 
         prefix = 'accounts/fireworks/models/'
-
         profile = None
         if model_name.startswith(prefix):
-            model_name = model_name[len(prefix) :]
+            new_model_name = model_name[len(prefix) :]
             for provider, profile_func in prefix_to_profile.items():
-                if model_name.startswith(provider):
-                    profile = profile_func(model_name)
+                if new_model_name.startswith(provider):
+                    profile = profile_func(new_model_name)
                     break
 
         # As the Fireworks API is OpenAI-compatible, let's assume we also need OpenAIJsonSchemaTransformer,
         # unless json_schema_transformer is set explicitly
         return OpenAIModelProfile(json_schema_transformer=OpenAIJsonSchemaTransformer).update(profile)
 
-    @overload
-    def __init__(self) -> None: ...
+    def __init__(
+        self,
+        *,
+        api_key: str | None = None,
+        openai_client: AsyncOpenAI | None = None,
+        http_client: AsyncHTTPClient | None = None,
+    ) -> None:
+        api_key = api_key or os.getenv('FIREWORKS_API_KEY')
+        if not api_key and openai_client is None:
+            raise UserError(
+                'Set the `FIREWORKS_API_KEY` environment variable or pass it via `FireworksProvider(api_key=...)`'
+                'to use the Fireworks AI provider.'
+            )
 
-    @overload
-    def __init__(self, *, api_key: str) -> None: ...
+        if openai_client is not None:
+            self._client = openai_client
+        elif http_client is not None:
+            self._client = AsyncOpenAI(base_url=self.base_url, api_key=api_key, http_client=http_client)
+        else:
+            http_client = cached_async_http_client(provider='fireworks')
+            self._client = AsyncOpenAI(base_url=self.base_url, api_key=api_key, http_client=http_client)
 
-    @overload
-    def __init__(self, *, api_key: str, http_client: AsyncHTTPClient) -> None: ...
+    def __init__(
+        self,
+        *,
+        api_key: str | None = None,
+        openai_client: AsyncOpenAI | None = None,
+        http_client: AsyncHTTPClient | None = None,
+    ) -> None:
+        api_key = api_key or os.getenv('FIREWORKS_API_KEY')
+        if not api_key and openai_client is None:
+            raise UserError(
+                'Set the `FIREWORKS_API_KEY` environment variable or pass it via `FireworksProvider(api_key=...)`'
+                'to use the Fireworks AI provider.'
+            )
 
-    @overload
-    def __init__(self, *, openai_client: AsyncOpenAI | None = None) -> None: ...
+        if openai_client is not None:
+            self._client = openai_client
+        elif http_client is not None:
+            self._client = AsyncOpenAI(base_url=self.base_url, api_key=api_key, http_client=http_client)
+        else:
+            http_client = cached_async_http_client(provider='fireworks')
+            self._client = AsyncOpenAI(base_url=self.base_url, api_key=api_key, http_client=http_client)
+
+    def __init__(
+        self,
+        *,
+        api_key: str | None = None,
+        openai_client: AsyncOpenAI | None = None,
+        http_client: AsyncHTTPClient | None = None,
+    ) -> None:
+        api_key = api_key or os.getenv('FIREWORKS_API_KEY')
+        if not api_key and openai_client is None:
+            raise UserError(
+                'Set the `FIREWORKS_API_KEY` environment variable or pass it via `FireworksProvider(api_key=...)`'
+                'to use the Fireworks AI provider.'
+            )
+
+        if openai_client is not None:
+            self._client = openai_client
+        elif http_client is not None:
+            self._client = AsyncOpenAI(base_url=self.base_url, api_key=api_key, http_client=http_client)
+        else:
+            http_client = cached_async_http_client(provider='fireworks')
+            self._client = AsyncOpenAI(base_url=self.base_url, api_key=api_key, http_client=http_client)
+
+    def __init__(
+        self,
+        *,
+        api_key: str | None = None,
+        openai_client: AsyncOpenAI | None = None,
+        http_client: AsyncHTTPClient | None = None,
+    ) -> None:
+        api_key = api_key or os.getenv('FIREWORKS_API_KEY')
+        if not api_key and openai_client is None:
+            raise UserError(
+                'Set the `FIREWORKS_API_KEY` environment variable or pass it via `FireworksProvider(api_key=...)`'
+                'to use the Fireworks AI provider.'
+            )
+
+        if openai_client is not None:
+            self._client = openai_client
+        elif http_client is not None:
+            self._client = AsyncOpenAI(base_url=self.base_url, api_key=api_key, http_client=http_client)
+        else:
+            http_client = cached_async_http_client(provider='fireworks')
+            self._client = AsyncOpenAI(base_url=self.base_url, api_key=api_key, http_client=http_client)
 
     def __init__(
         self,
