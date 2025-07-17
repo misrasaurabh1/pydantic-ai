@@ -350,22 +350,22 @@ class InstrumentedModel(WrapperModel):
 
     @staticmethod
     def model_attributes(model: Model):
-        attributes: dict[str, AttributeValue] = {
+        # Direct local access for (slightly) faster attribute lookups
+        attrs = {
             GEN_AI_SYSTEM_ATTRIBUTE: model.system,
             GEN_AI_REQUEST_MODEL_ATTRIBUTE: model.model_name,
         }
-        if base_url := model.base_url:
-            try:
-                parsed = urlparse(base_url)
-            except Exception:  # pragma: no cover
-                pass
-            else:
-                if parsed.hostname:  # pragma: no branch
-                    attributes['server.address'] = parsed.hostname
-                if parsed.port:  # pragma: no branch
-                    attributes['server.port'] = parsed.port
-
-        return attributes
+        base_url = model.base_url
+        # Only try to parse if base_url is a non-empty string and probably a URL
+        if base_url and '://' in base_url:
+            parsed = urlparse(base_url)
+            hostname = parsed.hostname
+            port = parsed.port
+            if hostname is not None:
+                attrs['server.address'] = hostname
+            if port is not None:
+                attrs['server.port'] = port
+        return attrs
 
     @staticmethod
     def event_to_dict(event: Event) -> dict[str, Any]:
