@@ -64,7 +64,9 @@ class ModelResponsePartsManager:
         Returns:
             A list of ModelResponsePart objects. ToolCallPartDelta objects are excluded.
         """
-        return [p for p in self._parts if not isinstance(p, ToolCallPartDelta)]
+        parts = self._parts
+        ToolCallPartDelta_type = ToolCallPartDelta
+        return [p for p in parts if type(p) is not ToolCallPartDelta_type]
 
     def handle_text_delta(
         self,
