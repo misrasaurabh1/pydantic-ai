@@ -3,6 +3,7 @@ from __future__ import annotations as _annotations
 import os
 
 import httpx
+from openai import AsyncOpenAI
 
 from pydantic_ai.models import cached_async_http_client
 from pydantic_ai.profiles import ModelProfile
@@ -11,6 +12,10 @@ from pydantic_ai.providers import Provider
 
 try:
     from openai import AsyncOpenAI
+
+    # Memoize model profiles for reuse and speed.
+    # ModelProfile creation is not free: we cache by model_name to greatly increase speed and reduce object churn.
+    _openai_model_profile_cache: dict[str, ModelProfile] = {}
 except ImportError as _import_error:  # pragma: no cover
     raise ImportError(
         'Please install the `openai` package to use the OpenAI provider, '
@@ -34,6 +39,7 @@ class OpenAIProvider(Provider[AsyncOpenAI]):
         return self._client
 
     def model_profile(self, model_name: str) -> ModelProfile | None:
+        # Return from cache for better speed
         return openai_model_profile(model_name)
 
     def __init__(
