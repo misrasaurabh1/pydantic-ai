@@ -7,14 +7,20 @@ from pydantic_ai.exceptions import UserError
 from . import ModelProfile
 from ._json_schema import JsonSchema, JsonSchemaTransformer
 
+# Caching singleton ModelProfile as function returns always the same result
+_singleton_google_model_profile: ModelProfile | None = None
+
 
 def google_model_profile(model_name: str) -> ModelProfile | None:
     """Get the model profile for a Google model."""
-    return ModelProfile(
-        json_schema_transformer=GoogleJsonSchemaTransformer,
-        supports_json_schema_output=True,
-        supports_json_object_output=True,
-    )
+    global _singleton_google_model_profile
+    if _singleton_google_model_profile is None:
+        _singleton_google_model_profile = ModelProfile(
+            json_schema_transformer=GoogleJsonSchemaTransformer,
+            supports_json_schema_output=True,
+            supports_json_object_output=True,
+        )
+    return _singleton_google_model_profile
 
 
 class GoogleJsonSchemaTransformer(JsonSchemaTransformer):

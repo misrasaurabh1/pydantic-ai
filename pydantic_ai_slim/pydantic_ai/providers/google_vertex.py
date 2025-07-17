@@ -3,7 +3,7 @@ from __future__ import annotations as _annotations
 import functools
 from collections.abc import AsyncGenerator, Mapping
 from pathlib import Path
-from typing import Literal, overload
+from typing import Literal
 
 import anyio.to_thread
 import httpx
@@ -19,6 +19,9 @@ try:
     from google.auth.credentials import Credentials as BaseCredentials
     from google.auth.transport.requests import Request
     from google.oauth2.service_account import Credentials as ServiceAccountCredentials
+
+    # Caching singleton ModelProfile as function returns always the same result
+    _singleton_google_model_profile: ModelProfile | None = None
 except ImportError as _import_error:
     raise ImportError(
         'Please install the `google-auth` package to use the Google Vertex AI provider, '
@@ -52,27 +55,81 @@ class GoogleVertexProvider(Provider[httpx.AsyncClient]):
     def model_profile(self, model_name: str) -> ModelProfile | None:
         return google_model_profile(model_name)
 
-    @overload
     def __init__(
         self,
         *,
         service_account_file: Path | str | None = None,
-        project_id: str | None = None,
-        region: VertexAiRegion = 'us-central1',
-        model_publisher: str = 'google',
-        http_client: httpx.AsyncClient | None = None,
-    ) -> None: ...
-
-    @overload
-    def __init__(
-        self,
-        *,
         service_account_info: Mapping[str, str] | None = None,
         project_id: str | None = None,
         region: VertexAiRegion = 'us-central1',
         model_publisher: str = 'google',
         http_client: httpx.AsyncClient | None = None,
-    ) -> None: ...
+    ) -> None:
+        """Create a new Vertex AI provider.
+
+        Args:
+            service_account_file: Path to a service account file.
+                If not provided, the service_account_info or default environment credentials will be used.
+            service_account_info: The loaded service_account_file contents.
+                If not provided, the service_account_file or default environment credentials will be used.
+            project_id: The project ID to use, if not provided it will be taken from the credentials.
+            region: The region to make requests to.
+            model_publisher: The model publisher to use, I couldn't find a good list of available publishers,
+                and from trial and error it seems non-google models don't work with the `generateContent` and
+                `streamGenerateContent` functions, hence only `google` is currently supported.
+                Please create an issue or PR if you know how to use other publishers.
+            http_client: An existing `httpx.AsyncClient` to use for making HTTP requests.
+        """
+        if service_account_file and service_account_info:
+            raise ValueError('Only one of `service_account_file` or `service_account_info` can be provided.')
+
+        self._client = http_client or cached_async_http_client(provider='google-vertex')
+        self.service_account_file = service_account_file
+        self.service_account_info = service_account_info
+        self.project_id = project_id
+        self.region = region
+        self.model_publisher = model_publisher
+
+        self._client.auth = _VertexAIAuth(service_account_file, service_account_info, project_id, region)
+        self._client.base_url = self.base_url
+
+    def __init__(
+        self,
+        *,
+        service_account_file: Path | str | None = None,
+        service_account_info: Mapping[str, str] | None = None,
+        project_id: str | None = None,
+        region: VertexAiRegion = 'us-central1',
+        model_publisher: str = 'google',
+        http_client: httpx.AsyncClient | None = None,
+    ) -> None:
+        """Create a new Vertex AI provider.
+
+        Args:
+            service_account_file: Path to a service account file.
+                If not provided, the service_account_info or default environment credentials will be used.
+            service_account_info: The loaded service_account_file contents.
+                If not provided, the service_account_file or default environment credentials will be used.
+            project_id: The project ID to use, if not provided it will be taken from the credentials.
+            region: The region to make requests to.
+            model_publisher: The model publisher to use, I couldn't find a good list of available publishers,
+                and from trial and error it seems non-google models don't work with the `generateContent` and
+                `streamGenerateContent` functions, hence only `google` is currently supported.
+                Please create an issue or PR if you know how to use other publishers.
+            http_client: An existing `httpx.AsyncClient` to use for making HTTP requests.
+        """
+        if service_account_file and service_account_info:
+            raise ValueError('Only one of `service_account_file` or `service_account_info` can be provided.')
+
+        self._client = http_client or cached_async_http_client(provider='google-vertex')
+        self.service_account_file = service_account_file
+        self.service_account_info = service_account_info
+        self.project_id = project_id
+        self.region = region
+        self.model_publisher = model_publisher
+
+        self._client.auth = _VertexAIAuth(service_account_file, service_account_info, project_id, region)
+        self._client.base_url = self.base_url
 
     def __init__(
         self,
