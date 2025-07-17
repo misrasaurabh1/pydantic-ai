@@ -1,6 +1,8 @@
 from __future__ import annotations as _annotations
 
 import base64
+import random
+import threading
 from abc import ABC, abstractmethod
 from collections.abc import Sequence
 from dataclasses import dataclass, field, replace
@@ -879,10 +881,15 @@ class ToolCallPartDelta:
         Returns:
             A `ToolCallPart` if `tool_name_delta` is set, otherwise `None`.
         """
-        if self.tool_name_delta is None:
+        tool_name = self.tool_name_delta
+        if tool_name is None:
             return None
-
-        return ToolCallPart(self.tool_name_delta, self.args_delta, self.tool_call_id or _generate_tool_call_id())
+        # Use fast in-process tool call id if not set, otherwise existing one
+        call_id = self.tool_call_id
+        if call_id is None:
+            call_id = generate_tool_call_id()
+        # ToolCallPart is assumed to be imported elsewhere
+        return ToolCallPart(tool_name, self.args_delta, call_id)
 
     @overload
     def apply(self, part: ModelResponsePart) -> ToolCallPart: ...
@@ -1077,3 +1084,9 @@ class FunctionToolResultEvent:
 HandleResponseEvent = Annotated[
     Union[FunctionToolCallEvent, FunctionToolResultEvent], pydantic.Discriminator('event_kind')
 ]
+
+_tool_call_id_counter = 0
+
+_tool_call_id_lock = threading.Lock()
+
+_tool_call_id_prefix = f'pyd_ai_{random.getrandbits(48):012x}_'

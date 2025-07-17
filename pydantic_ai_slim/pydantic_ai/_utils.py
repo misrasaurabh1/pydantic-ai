@@ -3,10 +3,11 @@ from __future__ import annotations as _annotations
 import asyncio
 import functools
 import inspect
+import random
 import re
 import sys
+import threading
 import time
-import uuid
 import warnings
 from collections.abc import AsyncIterable, AsyncIterator, Awaitable, Iterator
 from contextlib import asynccontextmanager, suppress
@@ -237,7 +238,11 @@ def generate_tool_call_id() -> str:
 
     Ensure that the tool call id is unique.
     """
-    return f'pyd_ai_{uuid.uuid4().hex}'
+    global _tool_call_id_counter
+    with _tool_call_id_lock:
+        count = _tool_call_id_counter
+        _tool_call_id_counter += 1
+    return f'{_tool_call_id_prefix}{count}'
 
 
 class PeekableAsyncStream(Generic[T]):
@@ -478,3 +483,10 @@ else:
 
     def get_async_lock() -> asyncio.Lock:  # pragma: lax no cover
         return asyncio.Lock()
+
+
+_tool_call_id_counter = 0
+
+_tool_call_id_lock = threading.Lock()
+
+_tool_call_id_prefix = f'pyd_ai_{random.getrandbits(48):012x}_'
