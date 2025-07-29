@@ -90,34 +90,31 @@ class ModelResponsePartsManager:
         Raises:
             UnexpectedModelBehavior: If attempting to apply text content to a part that is not a TextPart.
         """
-        _parts = self._parts
-        _vendor_id_to_part_index = self._vendor_id_to_part_index
-
         if vendor_part_id is None:
-            if _parts:
-                part_index = len(_parts) - 1
-                latest_part = _parts[part_index]
+            if self._parts:
+                part_index = len(self._parts) - 1
+                latest_part = self._parts[part_index]
                 if isinstance(latest_part, TextPart):
                     text_delta = TextPartDelta(content_delta=content)
                     text_delta.apply(latest_part)
                     return PartDeltaEvent(index=part_index, delta=text_delta)
-            new_part_index = len(_parts)
+            new_part_index = len(self._parts)
             part = TextPart(content=content)
-            _parts.append(part)
+            self._parts.append(part)
             return PartStartEvent(index=new_part_index, part=part)
         else:
-            part_index = _vendor_id_to_part_index.get(vendor_part_id)
+            part_index = self._vendor_id_to_part_index.get(vendor_part_id)
             if part_index is not None:
-                existing_part = _parts[part_index]
+                existing_part = self._parts[part_index]
                 if not isinstance(existing_part, TextPart):
                     raise UnexpectedModelBehavior(f'Cannot apply a text delta to {existing_part=}')
                 text_delta = TextPartDelta(content_delta=content)
                 text_delta.apply(existing_part)
                 return PartDeltaEvent(index=part_index, delta=text_delta)
-            new_part_index = len(_parts)
+            new_part_index = len(self._parts)
             part = TextPart(content=content)
-            _parts.append(part)
-            _vendor_id_to_part_index[vendor_part_id] = new_part_index
+            self._parts.append(part)
+            self._vendor_id_to_part_index[vendor_part_id] = new_part_index
             return PartStartEvent(index=new_part_index, part=part)
 
     def handle_thinking_delta(

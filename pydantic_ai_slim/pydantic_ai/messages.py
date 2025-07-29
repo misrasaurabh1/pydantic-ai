@@ -793,13 +793,7 @@ class TextPartDelta:
         """
         if not isinstance(part, TextPart):
             raise ValueError('Cannot apply TextPartDeltas to non-TextParts')  # pragma: no cover
-        try:
-            part.content += self.content_delta
-            return part
-        except Exception:
-            from dataclasses import replace
-
-            return replace(part, content=part.content + self.content_delta)
+        return replace(part, content=part.content + self.content_delta)
 
     __repr__ = _utils.dataclasses_no_defaults_repr
 
