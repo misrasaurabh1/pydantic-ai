@@ -90,38 +90,32 @@ class ModelResponsePartsManager:
         Raises:
             UnexpectedModelBehavior: If attempting to apply text content to a part that is not a TextPart.
         """
-        existing_text_part_and_index: tuple[TextPart, int] | None = None
-
         if vendor_part_id is None:
-            # If the vendor_part_id is None, check if the latest part is a TextPart to update
             if self._parts:
                 part_index = len(self._parts) - 1
                 latest_part = self._parts[part_index]
                 if isinstance(latest_part, TextPart):
-                    existing_text_part_and_index = latest_part, part_index
+                    text_delta = TextPartDelta(content_delta=content)
+                    text_delta.apply(latest_part)
+                    return PartDeltaEvent(index=part_index, delta=text_delta)
+            new_part_index = len(self._parts)
+            part = TextPart(content=content)
+            self._parts.append(part)
+            return PartStartEvent(index=new_part_index, part=part)
         else:
-            # Otherwise, attempt to look up an existing TextPart by vendor_part_id
             part_index = self._vendor_id_to_part_index.get(vendor_part_id)
             if part_index is not None:
                 existing_part = self._parts[part_index]
                 if not isinstance(existing_part, TextPart):
                     raise UnexpectedModelBehavior(f'Cannot apply a text delta to {existing_part=}')
-                existing_text_part_and_index = existing_part, part_index
-
-        if existing_text_part_and_index is None:
-            # There is no existing text part that should be updated, so create a new one
+                text_delta = TextPartDelta(content_delta=content)
+                text_delta.apply(existing_part)
+                return PartDeltaEvent(index=part_index, delta=text_delta)
             new_part_index = len(self._parts)
             part = TextPart(content=content)
-            if vendor_part_id is not None:
-                self._vendor_id_to_part_index[vendor_part_id] = new_part_index
             self._parts.append(part)
+            self._vendor_id_to_part_index[vendor_part_id] = new_part_index
             return PartStartEvent(index=new_part_index, part=part)
-        else:
-            # Update the existing TextPart with the new content delta
-            existing_text_part, part_index = existing_text_part_and_index
-            part_delta = TextPartDelta(content_delta=content)
-            self._parts[part_index] = part_delta.apply(existing_text_part)
-            return PartDeltaEvent(index=part_index, delta=part_delta)
 
     def handle_thinking_delta(
         self,
