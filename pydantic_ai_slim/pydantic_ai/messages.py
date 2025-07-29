@@ -791,16 +791,12 @@ class TextPartDelta:
         Raises:
             ValueError: If `part` is not a `TextPart`.
         """
-        # Fast path: modify in-place instead of allocate when safe
         if not isinstance(part, TextPart):
             raise ValueError('Cannot apply TextPartDeltas to non-TextParts')  # pragma: no cover
-        # Efficient in-place update if possible
-        # If content field is not frozen, do this:
         try:
             part.content += self.content_delta
             return part
         except Exception:
-            # Fallback to replace (should NOT happen for ordinary dataclasses)
             from dataclasses import replace
 
             return replace(part, content=part.content + self.content_delta)

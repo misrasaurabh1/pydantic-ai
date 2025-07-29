@@ -94,22 +94,18 @@ class ModelResponsePartsManager:
         _vendor_id_to_part_index = self._vendor_id_to_part_index
 
         if vendor_part_id is None:
-            # Fast path: update latest part if it is a TextPart
             if _parts:
                 part_index = len(_parts) - 1
                 latest_part = _parts[part_index]
                 if isinstance(latest_part, TextPart):
-                    # Update in-place for speed, then create event
                     text_delta = TextPartDelta(content_delta=content)
                     text_delta.apply(latest_part)
                     return PartDeltaEvent(index=part_index, delta=text_delta)
-            # Otherwise, create new part at end
             new_part_index = len(_parts)
             part = TextPart(content=content)
             _parts.append(part)
             return PartStartEvent(index=new_part_index, part=part)
         else:
-            # Lookup by id
             part_index = _vendor_id_to_part_index.get(vendor_part_id)
             if part_index is not None:
                 existing_part = _parts[part_index]
@@ -118,7 +114,6 @@ class ModelResponsePartsManager:
                 text_delta = TextPartDelta(content_delta=content)
                 text_delta.apply(existing_part)
                 return PartDeltaEvent(index=part_index, delta=text_delta)
-            # Not found -- create new part
             new_part_index = len(_parts)
             part = TextPart(content=content)
             _parts.append(part)
