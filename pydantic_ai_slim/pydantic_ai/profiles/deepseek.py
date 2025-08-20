@@ -6,3 +6,14 @@ from . import ModelProfile
 def deepseek_model_profile(model_name: str) -> ModelProfile | None:
     """Get the model profile for a DeepSeek model."""
     return None
+
+
+_META_PREFIXES = ('llama', 'meta-llama/')
+
+_GOOGLE_PREFIXES = ('gemma',)
+
+_QWEN_PREFIXES = ('qwen',)
+
+_DEEPSEEK_PREFIXES = ('deepseek',)
+
+_MISTRAL_PREFIXES = ('mistral',)

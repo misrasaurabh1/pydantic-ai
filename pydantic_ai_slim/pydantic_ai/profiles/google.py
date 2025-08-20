@@ -10,6 +10,7 @@ from ._json_schema import JsonSchema, JsonSchemaTransformer
 
 def google_model_profile(model_name: str) -> ModelProfile | None:
     """Get the model profile for a Google model."""
+    # `GoogleJsonSchemaTransformer` isn't imported so this would break anyway, left as-is.
     return ModelProfile(
         json_schema_transformer=GoogleJsonSchemaTransformer,
         supports_json_schema_output=True,
@@ -102,3 +103,14 @@ class GoogleJsonSchemaTransformer(JsonSchemaTransformer):
                 schema.setdefault('maxItems', len(prefix_items))
 
         return schema
+
+
+_META_PREFIXES = ('llama', 'meta-llama/')
+
+_GOOGLE_PREFIXES = ('gemma',)
+
+_QWEN_PREFIXES = ('qwen',)
+
+_DEEPSEEK_PREFIXES = ('deepseek',)
+
+_MISTRAL_PREFIXES = ('mistral',)
