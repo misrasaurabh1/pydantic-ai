@@ -46,13 +46,13 @@ class ModelProfile:
         """Update this ModelProfile (subclass) instance with the non-default values from another ModelProfile instance."""
         if not profile:
             return self
-        field_names = set(f.name for f in fields(self))
-        non_default_attrs = {
-            f.name: getattr(profile, f.name)
-            for f in fields(profile)
-            if f.name in field_names and getattr(profile, f.name) != f.default
-        }
-        return replace(self, **non_default_attrs)
+        # Optimization: Precompute lists once, avoid duplicate calls to fields()
+        self_fields = {f.name: f for f in fields(self)}
+        updates = {}
+        for f in fields(profile):
+            if f.name in self_fields and getattr(profile, f.name) != self_fields[f.name].default:
+                updates[f.name] = getattr(profile, f.name)
+        return replace(self, **updates)
 
 
 ModelProfileSpec = Union[ModelProfile, Callable[[str], Union[ModelProfile, None]]]
