@@ -1,6 +1,6 @@
 from __future__ import annotations as _annotations
 
-from dataclasses import dataclass, fields, replace
+from dataclasses import dataclass
 from textwrap import dedent
 from typing import Callable, Union
 
@@ -46,12 +46,15 @@ class ModelProfile:
         """Update this ModelProfile (subclass) instance with the non-default values from another ModelProfile instance."""
         if not profile:
             return self
-        field_names = set(f.name for f in fields(self))
-        non_default_attrs = {
-            f.name: getattr(profile, f.name)
-            for f in fields(profile)
-            if f.name in field_names and getattr(profile, f.name) != f.default
-        }
+        # Importing in function for speed (avoid import if not used)
+        from dataclasses import fields, replace
+
+        # Only update fields where profile value != field default
+        non_default_attrs = {}
+        for f in fields(self):
+            v = getattr(profile, f.name, f.default)
+            if v != f.default:
+                non_default_attrs[f.name] = v
         return replace(self, **non_default_attrs)
 
 

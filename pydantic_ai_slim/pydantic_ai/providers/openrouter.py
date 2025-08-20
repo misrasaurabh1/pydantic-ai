@@ -1,7 +1,6 @@
 from __future__ import annotations as _annotations
 
 import os
-from typing import overload
 
 from httpx import AsyncClient as AsyncHTTPClient
 from openai import AsyncOpenAI
@@ -46,6 +45,7 @@ class OpenRouterProvider(Provider[AsyncOpenAI]):
         return self._client
 
     def model_profile(self, model_name: str) -> ModelProfile | None:
+        # Map provider name to proper profile function
         provider_to_profile = {
             'google': google_model_profile,
             'openai': openai_model_profile,
@@ -58,29 +58,16 @@ class OpenRouterProvider(Provider[AsyncOpenAI]):
             'deepseek': deepseek_model_profile,
             'meta-llama': meta_model_profile,
         }
-
+        provider, model = model_name.split('/', 1)
         profile = None
-
-        provider, model_name = model_name.split('/', 1)
         if provider in provider_to_profile:
-            model_name, *_ = model_name.split(':', 1)  # drop tags
-            profile = provider_to_profile[provider](model_name)
+            # drop possible model tags after ':'
+            short_model = model.split(':', 1)[0]
+            profile = provider_to_profile[provider](short_model)
 
         # As OpenRouterProvider is always used with OpenAIModel, which used to unconditionally use OpenAIJsonSchemaTransformer,
         # we need to maintain that behavior unless json_schema_transformer is set explicitly
         return OpenAIModelProfile(json_schema_transformer=OpenAIJsonSchemaTransformer).update(profile)
-
-    @overload
-    def __init__(self) -> None: ...
-
-    @overload
-    def __init__(self, *, api_key: str) -> None: ...
-
-    @overload
-    def __init__(self, *, api_key: str, http_client: AsyncHTTPClient) -> None: ...
-
-    @overload
-    def __init__(self, *, openai_client: AsyncOpenAI | None = None) -> None: ...
 
     def __init__(
         self,
@@ -95,11 +82,94 @@ class OpenRouterProvider(Provider[AsyncOpenAI]):
                 'Set the `OPENROUTER_API_KEY` environment variable or pass it via `OpenRouterProvider(api_key=...)`'
                 'to use the OpenRouter provider.'
             )
-
         if openai_client is not None:
             self._client = openai_client
-        elif http_client is not None:
-            self._client = AsyncOpenAI(base_url=self.base_url, api_key=api_key, http_client=http_client)
         else:
-            http_client = cached_async_http_client(provider='openrouter')
+            if http_client is None:
+                http_client = cached_async_http_client(provider='openrouter')
+            # `self.base_url` is expected to exist from Provider supertype
+            self._client = AsyncOpenAI(base_url=self.base_url, api_key=api_key, http_client=http_client)
+
+    def __init__(
+        self,
+        *,
+        api_key: str | None = None,
+        openai_client: AsyncOpenAI | None = None,
+        http_client: AsyncHTTPClient | None = None,
+    ) -> None:
+        api_key = api_key or os.getenv('OPENROUTER_API_KEY')
+        if not api_key and openai_client is None:
+            raise UserError(
+                'Set the `OPENROUTER_API_KEY` environment variable or pass it via `OpenRouterProvider(api_key=...)`'
+                'to use the OpenRouter provider.'
+            )
+        if openai_client is not None:
+            self._client = openai_client
+        else:
+            if http_client is None:
+                http_client = cached_async_http_client(provider='openrouter')
+            # `self.base_url` is expected to exist from Provider supertype
+            self._client = AsyncOpenAI(base_url=self.base_url, api_key=api_key, http_client=http_client)
+
+    def __init__(
+        self,
+        *,
+        api_key: str | None = None,
+        openai_client: AsyncOpenAI | None = None,
+        http_client: AsyncHTTPClient | None = None,
+    ) -> None:
+        api_key = api_key or os.getenv('OPENROUTER_API_KEY')
+        if not api_key and openai_client is None:
+            raise UserError(
+                'Set the `OPENROUTER_API_KEY` environment variable or pass it via `OpenRouterProvider(api_key=...)`'
+                'to use the OpenRouter provider.'
+            )
+        if openai_client is not None:
+            self._client = openai_client
+        else:
+            if http_client is None:
+                http_client = cached_async_http_client(provider='openrouter')
+            # `self.base_url` is expected to exist from Provider supertype
+            self._client = AsyncOpenAI(base_url=self.base_url, api_key=api_key, http_client=http_client)
+
+    def __init__(
+        self,
+        *,
+        api_key: str | None = None,
+        openai_client: AsyncOpenAI | None = None,
+        http_client: AsyncHTTPClient | None = None,
+    ) -> None:
+        api_key = api_key or os.getenv('OPENROUTER_API_KEY')
+        if not api_key and openai_client is None:
+            raise UserError(
+                'Set the `OPENROUTER_API_KEY` environment variable or pass it via `OpenRouterProvider(api_key=...)`'
+                'to use the OpenRouter provider.'
+            )
+        if openai_client is not None:
+            self._client = openai_client
+        else:
+            if http_client is None:
+                http_client = cached_async_http_client(provider='openrouter')
+            # `self.base_url` is expected to exist from Provider supertype
+            self._client = AsyncOpenAI(base_url=self.base_url, api_key=api_key, http_client=http_client)
+
+    def __init__(
+        self,
+        *,
+        api_key: str | None = None,
+        openai_client: AsyncOpenAI | None = None,
+        http_client: AsyncHTTPClient | None = None,
+    ) -> None:
+        api_key = api_key or os.getenv('OPENROUTER_API_KEY')
+        if not api_key and openai_client is None:
+            raise UserError(
+                'Set the `OPENROUTER_API_KEY` environment variable or pass it via `OpenRouterProvider(api_key=...)`'
+                'to use the OpenRouter provider.'
+            )
+        if openai_client is not None:
+            self._client = openai_client
+        else:
+            if http_client is None:
+                http_client = cached_async_http_client(provider='openrouter')
+            # `self.base_url` is expected to exist from Provider supertype
             self._client = AsyncOpenAI(base_url=self.base_url, api_key=api_key, http_client=http_client)
