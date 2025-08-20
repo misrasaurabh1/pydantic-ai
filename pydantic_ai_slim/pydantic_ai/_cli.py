@@ -12,6 +12,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, cast
 
+from rich.console import Console
+from rich.syntax import Syntax
 from typing_inspection.introspection import get_literal_values
 
 from . import __version__
@@ -318,33 +320,54 @@ def handle_slash_command(
         try:
             parts = messages[-1].parts
         except IndexError:
-            console.print('[dim]No markdown output available.[/dim]')
+            console.print(NO_MARKDOWN_MSG)
         else:
-            console.print('[dim]Markdown output of last question:[/dim]\n')
-            for part in parts:
-                if part.part_kind == 'text':
-                    console.print(
-                        Syntax(
-                            part.content,
-                            lexer='markdown',
-                            theme=code_theme,
-                            word_wrap=True,
-                            background_color='default',
-                        )
-                    )
+            # Gather all 'text' parts and create Syntax objects in a single pass.
+            syntax_blocks = [
+                Syntax(
+                    part.content,
+                    lexer='markdown',
+                    theme=code_theme,
+                    word_wrap=True,
+                    background_color='default',
+                )
+                for part in parts
+                if part.part_kind == 'text'
+            ]
+            if syntax_blocks:
+                # Print message and all syntax blocks in a single call for efficiency.
+                console.print(LAST_Q_MARKDOWN_MSG, *syntax_blocks)
+            else:
+                console.print(NO_MARKDOWN_MSG)
+        return None, multiline
 
-    elif ident_prompt == '/multiline':
+    if ident_prompt == '/multiline':
         multiline = not multiline
         if multiline:
-            console.print(
-                'Enabling multiline mode. [dim]Press [Meta+Enter] or [Esc] followed by [Enter] to accept input.[/dim]'
-            )
+            console.print(ENABLE_MULTILINE_MSG)
         else:
-            console.print('Disabling multiline mode.')
+            console.print(DISABLE_MULTILINE_MSG)
         return None, multiline
-    elif ident_prompt == '/exit':
-        console.print('[dim]Exiting…[/dim]')
+
+    if ident_prompt == '/exit':
+        console.print(EXITING_MSG)
         return 0, multiline
-    else:
-        console.print(f'[red]Unknown command[/red] [magenta]`{ident_prompt}`[/magenta]')
+
+    # Unknown command path
+    console.print(UNKNOWN_CMD_TEMPLATE.format(ident_prompt))
     return None, multiline
+
+
+NO_MARKDOWN_MSG = '[dim]No markdown output available.[/dim]'
+
+LAST_Q_MARKDOWN_MSG = '[dim]Markdown output of last question:[/dim]\n'
+
+ENABLE_MULTILINE_MSG = (
+    'Enabling multiline mode. [dim]Press [Meta+Enter] or [Esc] followed by [Enter] to accept input.[/dim]'
+)
+
+DISABLE_MULTILINE_MSG = 'Disabling multiline mode.'
+
+EXITING_MSG = '[dim]Exiting…[/dim]'
+
+UNKNOWN_CMD_TEMPLATE = '[red]Unknown command[/red] [magenta]`{}`[/magenta]'
