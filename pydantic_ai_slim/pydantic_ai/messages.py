@@ -1,6 +1,7 @@
 from __future__ import annotations as _annotations
 
 import base64
+import re
 from abc import ABC, abstractmethod
 from collections.abc import Sequence
 from dataclasses import dataclass, field, replace
@@ -1077,3 +1078,5 @@ class FunctionToolResultEvent:
 HandleResponseEvent = Annotated[
     Union[FunctionToolCallEvent, FunctionToolResultEvent], pydantic.Discriminator('event_kind')
 ]
+
+_token_split_re = re.compile(r'[\s",.:]+')
