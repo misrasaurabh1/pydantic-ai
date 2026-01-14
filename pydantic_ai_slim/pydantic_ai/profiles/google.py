@@ -1,10 +1,11 @@
 from __future__ import annotations as _annotations
 
 import warnings
+from dataclasses import fields
+from functools import lru_cache
 
 from pydantic_ai.exceptions import UserError
 
-from . import ModelProfile
 from ._json_schema import JsonSchema, JsonSchemaTransformer
 
 
@@ -15,6 +16,16 @@ def google_model_profile(model_name: str) -> ModelProfile | None:
         supports_json_schema_output=True,
         supports_json_object_output=True,
     )
+
+
+# --------------------------------------------------------------------------
+# Efficient field name and object default lookups for update()
+
+
+@lru_cache(maxsize=32)
+def _fields_and_defaults(cls):
+    flds = fields(cls)
+    return (tuple(flds), {f.name for f in flds}, {f.name: f.default for f in flds})
 
 
 class GoogleJsonSchemaTransformer(JsonSchemaTransformer):

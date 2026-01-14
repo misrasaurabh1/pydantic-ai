@@ -1,7 +1,8 @@
 from __future__ import annotations as _annotations
 
 import os
-from typing import overload
+from dataclasses import fields
+from functools import lru_cache
 
 from httpx import AsyncClient as AsyncHTTPClient
 from openai import AsyncOpenAI
@@ -49,29 +50,14 @@ class TogetherProvider(Provider[AsyncOpenAI]):
             'meta-llama': meta_model_profile,
             'mistralai': mistral_model_profile,
         }
-
         profile = None
-
         model_name = model_name.lower()
         provider, model_name = model_name.split('/', 1)
         if provider in provider_to_profile:
             profile = provider_to_profile[provider](model_name)
-
         # As the Together API is OpenAI-compatible, let's assume we also need OpenAIJsonSchemaTransformer,
         # unless json_schema_transformer is set explicitly
         return OpenAIModelProfile(json_schema_transformer=OpenAIJsonSchemaTransformer).update(profile)
-
-    @overload
-    def __init__(self) -> None: ...
-
-    @overload
-    def __init__(self, *, api_key: str) -> None: ...
-
-    @overload
-    def __init__(self, *, api_key: str, http_client: AsyncHTTPClient) -> None: ...
-
-    @overload
-    def __init__(self, *, openai_client: AsyncOpenAI | None = None) -> None: ...
 
     def __init__(
         self,
@@ -94,3 +80,101 @@ class TogetherProvider(Provider[AsyncOpenAI]):
         else:
             http_client = cached_async_http_client(provider='together')
             self._client = AsyncOpenAI(base_url=self.base_url, api_key=api_key, http_client=http_client)
+
+    def __init__(
+        self,
+        *,
+        api_key: str | None = None,
+        openai_client: AsyncOpenAI | None = None,
+        http_client: AsyncHTTPClient | None = None,
+    ) -> None:
+        api_key = api_key or os.getenv('TOGETHER_API_KEY')
+        if not api_key and openai_client is None:
+            raise UserError(
+                'Set the `TOGETHER_API_KEY` environment variable or pass it via `TogetherProvider(api_key=...)`'
+                'to use the Together AI provider.'
+            )
+
+        if openai_client is not None:
+            self._client = openai_client
+        elif http_client is not None:
+            self._client = AsyncOpenAI(base_url=self.base_url, api_key=api_key, http_client=http_client)
+        else:
+            http_client = cached_async_http_client(provider='together')
+            self._client = AsyncOpenAI(base_url=self.base_url, api_key=api_key, http_client=http_client)
+
+    def __init__(
+        self,
+        *,
+        api_key: str | None = None,
+        openai_client: AsyncOpenAI | None = None,
+        http_client: AsyncHTTPClient | None = None,
+    ) -> None:
+        api_key = api_key or os.getenv('TOGETHER_API_KEY')
+        if not api_key and openai_client is None:
+            raise UserError(
+                'Set the `TOGETHER_API_KEY` environment variable or pass it via `TogetherProvider(api_key=...)`'
+                'to use the Together AI provider.'
+            )
+
+        if openai_client is not None:
+            self._client = openai_client
+        elif http_client is not None:
+            self._client = AsyncOpenAI(base_url=self.base_url, api_key=api_key, http_client=http_client)
+        else:
+            http_client = cached_async_http_client(provider='together')
+            self._client = AsyncOpenAI(base_url=self.base_url, api_key=api_key, http_client=http_client)
+
+    def __init__(
+        self,
+        *,
+        api_key: str | None = None,
+        openai_client: AsyncOpenAI | None = None,
+        http_client: AsyncHTTPClient | None = None,
+    ) -> None:
+        api_key = api_key or os.getenv('TOGETHER_API_KEY')
+        if not api_key and openai_client is None:
+            raise UserError(
+                'Set the `TOGETHER_API_KEY` environment variable or pass it via `TogetherProvider(api_key=...)`'
+                'to use the Together AI provider.'
+            )
+
+        if openai_client is not None:
+            self._client = openai_client
+        elif http_client is not None:
+            self._client = AsyncOpenAI(base_url=self.base_url, api_key=api_key, http_client=http_client)
+        else:
+            http_client = cached_async_http_client(provider='together')
+            self._client = AsyncOpenAI(base_url=self.base_url, api_key=api_key, http_client=http_client)
+
+    def __init__(
+        self,
+        *,
+        api_key: str | None = None,
+        openai_client: AsyncOpenAI | None = None,
+        http_client: AsyncHTTPClient | None = None,
+    ) -> None:
+        api_key = api_key or os.getenv('TOGETHER_API_KEY')
+        if not api_key and openai_client is None:
+            raise UserError(
+                'Set the `TOGETHER_API_KEY` environment variable or pass it via `TogetherProvider(api_key=...)`'
+                'to use the Together AI provider.'
+            )
+
+        if openai_client is not None:
+            self._client = openai_client
+        elif http_client is not None:
+            self._client = AsyncOpenAI(base_url=self.base_url, api_key=api_key, http_client=http_client)
+        else:
+            http_client = cached_async_http_client(provider='together')
+            self._client = AsyncOpenAI(base_url=self.base_url, api_key=api_key, http_client=http_client)
+
+
+# --------------------------------------------------------------------------
+# Efficient field name and object default lookups for update()
+
+
+@lru_cache(maxsize=32)
+def _fields_and_defaults(cls):
+    flds = fields(cls)
+    return (tuple(flds), {f.name for f in flds}, {f.name: f.default for f in flds})
